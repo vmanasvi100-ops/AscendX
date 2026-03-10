@@ -1,0 +1,8 @@
+{
+  "name": "AscendX",
+  "description": "High-fidelity interview simulation platform utilizing a real-time Probing Pipeline for deep domain analysis and psychological alignment.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
