@@ -11,7 +11,7 @@ import { generateInitialQuestions } from '../services/questionService';
 
 // Set worker path for PDF.js (must be after all imports)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-
+console.log("debugging deployment");
 interface WelcomeScreenProps {
   onStart: () => void;
   logEvent: (type: AnalyticsEventType, metadata?: Record<string, any>) => void;
