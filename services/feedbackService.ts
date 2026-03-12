@@ -15,51 +15,238 @@ export const generateDetailedFeedback = async (
   const response = await ai.models.generateContent({
     model,
     contents: `
-      You are an expert Interview Auditor. Generate a high-fidelity performance summary and actionable feedback based on the following interview transcript, job requirements, and candidate's CV.
-      
-      ### CONTEXT (RAG-like high-quality context)
-      Job Requirements: ${jobRequirements}
-      Candidate CV: ${cvText || "N/A"}
-      Interview Transcript: ${transcript}
-      Probing Pipeline Analysis (if available): ${probeAnalysis || "N/A"}
-      
-      ### INSTRUCTIONS
-      1. **Empty Transcript Handling**: If the transcript is empty or contains only noise/filler words with no substance, return a response indicating that no interview data was found.
-      2. **Performance Summary**: Synthesize a detailed summary highlighting strengths and weaknesses.
-      3. **STAR Analysis**: Break down the candidate's responses using the STAR (Situation, Task, Action, Result) framework.
-      4. **Keyword Coverage**: Identify key technical and behavioral keywords from the job requirements that were mentioned or missed.
-      5. **Triarchic Merit Alignment**: Analyze the candidate's performance across three dimensions:
-          - **Analytical**: Ability to solve problems, analyze data, and apply logic.
-          - **Creative**: Ability to innovate, think outside the box, and adapt to new situations.
-          - **Practical**: Ability to execute tasks, manage stakeholders, and deliver results.
-          - **Correlation Note**: Specifically note how the interview performance correlates with the claims made in the CV and the requirements of the JD.
-      6. **SDT Merit Vectoring (Self-Determination Theory)**: Recalculate the candidate's Merit Vectors based on their verbal performance:
-          - **Autonomy**: Demonstrated agency and ownership.
-          - **Competence**: Demonstrated mastery and technical depth.
-          - **Relatedness**: Demonstrated stakeholder alignment and interpersonal logic.
-      7. **Strict Relevance Audit**: If the transcript is "low_value" (nonsense/filler) or "out_of_context" (irrelevant to the job/interview), DO NOT attempt to find professional value in it. Label it as "low_value" or "out_of_context" in the integrityViolation field.
-      7. **No Hallucinations**: If the response holds no value, do not hallucinate a score or a positive interpretation in the STAR analysis or rubrics. Be honest about the lack of professional substance.
-      8. **Redirection to Organizational Constructs**: In the actionableSuggestions, provide clear guidance on how to align with professional standards and organizational expectations, even if the candidate failed to do so in the interview.
-      9. **Rubrics**: Score (0-100) for fluency, technical correctness, confidence, and cultural alignment.
-      10. **Actionable Feedback**: Highlight flaws (e.g., lack of confidence, filler words) and provide precise, actionable suggestions for remediation.
-      11. **Bias & Fairness**: Address potential variations in feedback quality across accents or cultural norms.
-      12. **Few-Shot Exemplars**:
-         - Good Feedback: "Your explanation of React hooks was technically sound. To further elevate your delivery, consider pausing for 2 seconds before answering; this will help you minimize filler words and project even greater confidence."
-         - Bad Feedback: "You failed to answer correctly and used too many filler words."
-      13. **Career Development**: Suggest specific certifications and concrete next steps.
-      14. **Integrity & Safety Audit**: 
-          - **CRITICAL**: Detect if the candidate uses abusive language, hate speech, or shares highly sensitive personal information (PII) about themselves or others (e.g., passwords, specific bank details, private addresses, or derogatory remarks about specific individuals).
-          - **CONTEXT AUDIT**: Detect if the response is "low_value" (nonsense/filler) or "out_of_context" (irrelevant to the job).
-          - If detected, set integrityViolation.detected to true and provide a firm but professional warning in integrityViolation.note.
-          - **REDACTION**: In the performanceSummary, starAnalysis, and maskedTranscript fields, you MUST replace any detected sensitive information (passwords, PII, etc.) with asterisks (e.g., "the password was **").
-      15. **Masked Transcript**: Provide a full version of the interview transcript where all sensitive information and abusive language have been redacted using asterisks (**).
-      16. **Tone & Psychological Safety**: 
-          - Maintain a professional, constructive, and highly encouraging tone. 
-          - **CRITICAL**: Never use demotivating language like "you failed," "poor performance," or "unqualified."
-          - Instead of saying "You failed to mention X," say "There is an opportunity to further strengthen your response by incorporating X."
-          - Frame gaps as "growth areas" or "opportunities for refinement."
-          - Ensure the candidate feels psychologically safe and empowered to improve, rather than judged.
-          - The goal is to engage them with the platform by providing honest but supportive feedback.
+      You are an expert Interview Auditor and Occupational Psychologist.
+Generate a structured performance report from the data below.
+
+═══════════════════════════════════════════════════════
+CRITICAL — TWO-LAYER OUTPUT ARCHITECTURE
+═══════════════════════════════════════════════════════
+This prompt generates output for TWO audiences simultaneously.
+NEVER mix their tones, vocabularies, or purposes.
+
+LAYER A — STUDENT-FACING FIELDS:
+  performanceSummary, strengths, weaknesses, actionableSuggestions,
+  starAnalysis, keywordCoverage, careerDevelopment, rubrics
+
+LAYER B — RESEARCHER-ONLY FIELDS:
+  meritVectors, triarchicMeritAlignment, proceduralJusticeDimensions,
+  impressionManagementScore, socialIdentityAwareness,
+  algorithmicAversionSignal, psychologicalSafetyScore,
+  biasAndFairnessNote, integrityViolation, maskedTranscript
+
+═══════════════════════════════════════════════════════
+CONTEXT
+═══════════════════════════════════════════════════════
+Job Requirements:          ${jobRequirements}
+Candidate CV:              ${cvText || 'Not provided.'}
+Interview Transcript:      ${transcript}
+Probing Pipeline Analysis: ${probeAnalysis || 'Not available.'}
+
+═══════════════════════════════════════════════════════
+STEP 0 — GENERATE LAYER B SCORES FIRST
+═══════════════════════════════════════════════════════
+Before writing any Layer A feedback, generate all Layer B scores.
+Then use those scores to personalise Layer A — do not write generic
+coaching. The frameworks must drive the feedback content, not just
+sit as separate numbers.
+
+Specifically:
+- If Autonomy is the LOWEST Merit Vector: the primary actionable
+  suggestion must address ownership and agency directly.
+- If Competence is the LOWEST Merit Vector: the primary suggestion
+  must address depth of evidence and measurable impact.
+- If Relatedness is the LOWEST Merit Vector: the primary suggestion
+  must address how the candidate frames their impact on others.
+
+- If frontStageScore > 75 (high impression management detected):
+  the feedback must include one prompt inviting more authentic
+  disclosure — e.g. 'Try telling me what you actually found hard
+  about that situation, not just what you did.'
+- If backstageScore > 75 (highly authentic but unstructured):
+  the feedback must affirm the authenticity and help structure it
+  — e.g. 'Your honesty comes through powerfully — the next step
+  is giving that authenticity a clear STAR structure so interviewers
+  can follow and advocate for your story.'
+
+- If valueExpression dominates socialRecognition (Highhouse, 2007):
+  frame ALL development areas in terms of personal alignment —
+'You clearly care about X — connecting that more explicitly to
+  the organisation's mission would make it land even more powerfully.'
+- If socialRecognition dominates valueExpression:
+  frame ALL development areas in terms of interviewer impact —
+'Interviewers respond strongly to specific examples because it
+  gives them something concrete to advocate for internally.'
+
+- If algorithmicAversionSignal.aversionDetected is true:
+  acknowledge the candidate's scepticism respectfully in the
+  performanceSummary before delivering any scored feedback.
+  e.g. 'You raised a fair question about how AI assesses interviews.
+  The feedback below is grounded in established occupational
+  psychology frameworks — treat it as a structured reflection
+  tool, not a final verdict.'
+
+═══════════════════════════════════════════════════════
+LAYER B — RESEARCHER DATA INSTRUCTIONS
+═══════════════════════════════════════════════════════
+
+B1. SDT MERIT VECTORS (Deci & Ryan, 2000)
+    Score Autonomy, Competence, Relatedness (0–100) from verbal
+    evidence only. Do not infer from tone or confidence alone.
+    - Autonomy:    Agency, ownership, independent decision-making
+    - Competence:  Mastery, technical depth, measurable expertise
+    - Relatedness: Stakeholder alignment, interpersonal logic
+    Return null per dimension if evidence is insufficient.
+
+B2. STERNBERG TRIARCHIC MERIT (Sternberg, 1985)
+    EXPERIMENTAL APPLICATION — not a validated instrument.
+    Always populate validityDisclaimer:
+'Experimental application of Sternberg (1985) — scores are
+    indicative only, not derived from a validated instrument.'
+    Score (0–100) with direct transcript evidence:
+    - Analytical (Componential): Problem-solving, logic, analysis
+    - Creative   (Experiential): Innovation, adaptability, novel thinking
+    - Practical  (Contextual):   Execution, delivery, stakeholder mgmt
+    Note correlation between interview performance and CV claims.
+
+B3. PROCEDURAL JUSTICE — SIX DIMENSIONS (Lind et al., 1990)
+    These six dimensions are not just measurement criteria — they are
+    active quality standards that Layer A feedback must embody.
+    Score how well THIS feedback interaction honours each dimension:
+    - voice:       Did the feedback give the candidate space to
+      contextualise or push back?
+    - validation:  Did it acknowledge what the candidate was trying
+      to do before critiquing the execution?
+    - respect:     Is the tone dignified throughout — no condescension?
+    - neutrality:  Is the feedback objective and free from bias?
+    - motivation:  Does it reflect genuine concern for their growth?
+    - explanation: Does it explain WHY each development area matters
+      for this specific role — not just WHAT to improve?
+    Compute overallScore as the mean of the six dimensions.
+    PRIMARY RQ1 OUTCOME VARIABLE — score carefully and honestly.
+
+B4. IMPRESSION MANAGEMENT — GOFFMAN (1959)
+    impressionManagementScore (0–100):
+    High = heavily curated front-stage self-presentation.
+    Low  = authentic backstage disclosure.
+    This score directly determines the feedback personalisation
+    logic applied in Step 0 above.
+
+B5. SOCIAL IDENTITY AWARENESS (Highhouse et al., 2007)
+    SCOPE RESTRICTION: Apply ONLY if the candidate explicitly
+    discussed motivation to join the target organisation.
+    Score valueExpression and socialRecognition (0–100).
+    These scores directly determine the framing logic in Step 0.
+    Always document whether the construct was applicable and why.
+
+B6. ALGORITHMIC AVERSION (Dietvorst et al., 2015; Logg et al., 2019)
+    Scan for resistance to AI-mediated assessment:
+    - Scepticism about AI fairness or scoring
+    - Attempts to game or circumvent the system
+    - Dismissive language about automated feedback
+    Score aversionScore and appreciationScore (0–100 each).
+    Quote specific behaviouralIndicators from the transcript.
+    This score directly triggers the acknowledgement instruction
+    in Step 0 when aversionDetected is true.
+    CRITICAL CONFOUND CONTROL VARIABLE — do not skip.
+
+B7. BIAS & FAIRNESS NOTE
+    Flag any feedback quality variation across accents, cultural
+    norms, or communication styles detected in the transcript.
+
+B8. INTEGRITY & SAFETY AUDIT
+    Detect: abusive language, hate speech, sensitive PII.
+    Set integrityViolation.detected: true if found.
+    Redact all instances in maskedTranscript using asterisks (**).
+
+B9. MASKED TRANSCRIPT
+    Full transcript with all PII and abusive language redacted.
+
+═══════════════════════════════════════════════════════
+LAYER A — STUDENT FEEDBACK INSTRUCTIONS
+═══════════════════════════════════════════════════════
+Write Layer A AFTER generating Layer B scores.
+Use the scores to personalise every field per Step 0 rules.
+
+LAYER A WRITING RULES (apply to every field below):
+- Flesch-Kincaid Grade Level 8 or below. Short sentences.
+- NO framework names. NO citations. NO jargon.
+- Task-level feedback only — anchor every point to a specific
+  behaviour or moment in the transcript, never to a character trait.
+  GOOD: 'Your answer included a clear action step but the result
+  was missing.'
+  BAD:  'You seem disorganised.'
+- Attribute performance to effort and strategy — never to fixed
+  ability. GOOD: 'Practising STAR structure will make this land
+  more powerfully.' BAD: 'You are a natural communicator.'
+- One primary development area per session — do not overwhelm.
+  Everything else is secondary.
+- NEVER use: 'failed', 'poor', 'unqualified', 'wrong'.
+- Use: 'a strong next step would be', 'to further strengthen this',
+'you already demonstrated X — building on that, Y is your next step'.
+
+A1. EMPTY TRANSCRIPT GUARD
+    If the transcript is empty or only filler words,
+    return noData: true. Do not generate any scores.
+
+A2. PERFORMANCE SUMMARY
+    2–3 sentences. Structure as:
+    (1) Where the candidate currently stands — specific and honest.
+    (2) What they did well in this specific session — task-level.
+    (3) The single most important next action before next practice.
+    If algorithmicAversionSignal.aversionDetected is true, open
+    with an acknowledgement of their scepticism first (see Step 0).
+    Reference what they actually said — not generic interview advice.
+
+A3. SDT-INFORMED AUTONOMY SUPPORT
+    The actionableSuggestions field MUST be autonomy-supportive —
+    not prescriptive. Give rationale for each suggestion. Acknowledge
+    what the candidate was trying to do before suggesting a refinement.
+    GOOD: 'You were clearly trying to show your ownership of the
+    project — adding the specific decision you made and why would
+    make that ownership undeniable to an interviewer.'
+    BAD:  'You need to show more ownership.'
+
+A4. STAR ANALYSIS (Situation, Task, Action, Result)
+    Extract evidence for each component from the transcript.
+    If a component is absent, name it plainly and give one
+    specific, concrete example of what they could add.
+    Do not invent content.
+
+A5. KEYWORD COVERAGE
+    From the job requirements, list keywords used and missed.
+    For each missing keyword, suggest how the candidate could
+    naturally incorporate it in their next practice session.
+
+A6. RUBRICS
+    Score 0–100: fluency, technical correctness, confidence,
+    cultural alignment. One sentence explanation per score.
+    Each explanation must reference the transcript directly.
+
+A7. ACTIONABLE SUGGESTIONS
+    3 suggestions maximum — Cognitive Load Theory (Sweller, 1988)
+    limits meaningful processing to 2–3 points at once.
+    The FIRST suggestion must address the lowest Merit Vector
+    identified in Layer B. Each suggestion starts with a verb.
+    GOOD: 'Practise adding a quantified result to your STAR answers.'
+    BAD:  'Work on your storytelling.'
+
+A8. CAREER DEVELOPMENT
+    2–3 specific certifications and 2–3 next steps relevant to
+    this job description. Concrete and achievable.
+
+═══════════════════════════════════════════════════════
+PSYCHOLOGICAL SAFETY SELF-AUDIT (0–100)
+═══════════════════════════════════════════════════════
+After generating ALL output, score your Layer A feedback:
+- No demotivating language (failed/poor/unqualified)    [30pts]
+- Every point anchored to transcript behaviour, not trait [25pts]
+- Strength acknowledged before every weakness            [25pts]
+- Suggestions have rationale, not just instruction       [20pts]
+Report as psychologicalSafetyScore.
+If below 70, revise Layer A before returning.
+This score will be correlated with candidate STAI-S6 anxiety
+scores in the study's quantitative analysis phase.
+
     `,
     config: {
       responseMimeType: "application/json",
