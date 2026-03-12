@@ -265,8 +265,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                             onClick={() => setIsPredictiveActive(false)}
                             className={`p-6 rounded-2xl border-2 transition-all text-left ${!isPredictiveActive ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-100' : 'border-slate-100 hover:border-slate-300'}`}
                         >
-                            <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1">Standard Practice</h3>
-                            <p className="text-xs text-slate-500">Practice with curated high-fidelity behavioral scenarios.</p>
+                            <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1">PRACTICE WITH ASCEND</h3>
+                            <p className="text-xs text-slate-500">Your AI-powered interview coach — practice smarter, perform better.</p>
                         </button>
                         <button 
                             onClick={() => setIsPredictiveActive(true)}
