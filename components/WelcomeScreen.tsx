@@ -293,7 +293,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                         <div id="welcome-audio-cues" className="mb-10 p-6 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-6">
                             <div>
                                 <h2 className="text-lg font-semibold text-slate-800 flex items-center" onMouseEnter={handleAudioActivationHover} onMouseLeave={cancelSpeech}>Audio Information Scaffolding <SpeakerIcon /></h2>
-                                <p className="text-slate-600 mt-1 text-sm">Provides optional audio-based versions of setup information of all features on the main welcome screen /></p>
+                                <p className="text-slate-600 mt-1 text-sm">Provides optional audio-based versions of setup information of all features on the main welcome screen</p>
                             </div>
                             <div id="welcome-audio-toggle" onClick={() => setAudioCues(!audioCues)} className={`flex-shrink-0 w-10 h-5 flex items-center rounded-full p-1 transition-colors cursor-pointer ${audioCues ? 'bg-blue-600' : 'bg-slate-300'}`}>
                                 <div className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform ${audioCues ? 'translate-x-5' : ''}`} />
