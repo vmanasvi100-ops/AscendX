@@ -246,7 +246,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                 <span className="bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border border-slate-200"></span>
                              </div>
                             <p className="text-slate-600" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                Your AI-powered interview coach — practice smarter, perform better
+                                Your AI-powered interview coach: Practice smarter, Perform better
                             </p>
                         </div>
                         <div className="flex gap-2">
@@ -273,13 +273,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                             className={`p-6 rounded-2xl border-2 transition-all text-left group ${isPredictiveActive ? 'border-indigo-600 bg-indigo-50/30 ring-4 ring-indigo-100' : 'border-slate-100 hover:border-slate-300'}`}
                         >
                             <div className="flex justify-between items-start">
-                                <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1">Scientific Auditor</h3>
+                                <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1"> Simple and direct Job Search</h3>
                                 <div className="p-1 bg-indigo-600 rounded text-[8px] text-white font-black uppercase tracking-tighter flex items-center gap-1">
                                     <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-                                    Merit Vectors
+                                  
                                 </div>
                             </div>
-                            <p className="text-xs text-slate-500">Discover hidden opportunities and manage your strategic career pipeline.</p>
+                            <p className="text-xs text-slate-500">Search smarter, track your applications, and stay on top of every opportunity</p>
                         </button>
                     </div>
                 </div>
@@ -293,7 +293,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                         <div id="welcome-audio-cues" className="mb-10 p-6 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-6">
                             <div>
                                 <h2 className="text-lg font-semibold text-slate-800 flex items-center" onMouseEnter={handleAudioActivationHover} onMouseLeave={cancelSpeech}>Audio Information Scaffolding <SpeakerIcon /></h2>
-                                <p className="text-slate-600 mt-1 text-sm">Provides optional audio-based versions of setup information and milestones.</p>
+                                <p className="text-slate-600 mt-1 text-sm">Provides optional audio-based versions of setup information of all features on the main welcome screen/p>
                             </div>
                             <div id="welcome-audio-toggle" onClick={() => setAudioCues(!audioCues)} className={`flex-shrink-0 w-10 h-5 flex items-center rounded-full p-1 transition-colors cursor-pointer ${audioCues ? 'bg-blue-600' : 'bg-slate-300'}`}>
                                 <div className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform ${audioCues ? 'translate-x-5' : ''}`} />
@@ -323,11 +323,11 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                 NDA & Confidentiality Agreement
                                             </label>
                                             <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                                                I confirm that I have read and signed the <a href="https://docs.google.com/forms/d/e/1FAIpQLScejmkwr0VNMQAjK8SkwZLWMch0irQm1r7n2UZyG_6qovVKVQ/viewform" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline inline-flex items-center gap-1">NDA Agreement Form <ShieldCheck size={12} /></a>. I understand that all session data and feedback are strictly confidential.
+                                                I confirm that I have read and signed the <a href="https://docs.google.com/forms/d/e/1FAIpQLScejmkwr0VNMQAjK8SkwZLWMch0irQm1r7n2UZyG_6qovVKVQ/viewform" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline inline-flex items-center gap-1">NDA Agreement Form <ShieldCheck size={12} /></a>. I understand this platform is for personal interview practice only and that its content, logic, and frameworks are protected and remains confidential.
                                             </p>
                                             {showNdaError && (
                                                 <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mt-3 animate-pulse">
-                                                    Required: Please sign the NDA to proceed.
+                                                    Required: Please take a moment to read and agree to our terms, this protects both you and Ascend.
                                                 </p>
                                             )}
                                         </div>
