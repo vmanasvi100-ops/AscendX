@@ -242,7 +242,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                     <div className="flex justify-between items-start">
                          <div id="welcome-header">
                              <div className="flex items-center gap-3 mb-2">
-                                <h1 className="text-3xl font-bold text-slate-900" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Ascend Practice</h1>
+                                <h1 className="text-3xl font-bold text-slate-900" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Ascend </h1>
                                 <span className="bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border border-slate-200">Scientific Engine v3.2</span>
                              </div>
                             <p className="text-slate-600" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
