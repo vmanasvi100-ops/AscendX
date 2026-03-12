@@ -12,26 +12,74 @@ export const generateProbe = async (transcript: string, context: string): Promis
     contents: `
       Analyze the following candidate interview transcript and context. 
       Generate a deep, Situational Judgement Test (SJT) based follow-up question (probe) in layman's terms.
-      
-      ### ADAPTIVE PROBING PROTOCOL
-      1. **Contextual Continuity**: The probe MUST be directly derived from the candidate's specific language. If they use metaphors, philosophical statements (e.g., "Life has its way of teaching"), or abstract concepts, acknowledge and build upon them.
-      2. **Clarifying Probes**: When a candidate uses a specific professional term, phrase, or mentions an experience from their CV/context that requires more depth, use one of these clarifying structures:
-         - "You mentioned [word or phrase], can you tell me more about what you mean by that?"
-         - "What do you mean by [phrase]?"
-         - "Could you clarify what you meant by [phrase]?"
-      3. **Bridging Abstract to Concrete**: If the candidate makes a philosophical or high-level statement, ask them to correlate it with their previous learning or, ideally, to explain how that philosophy manifested in a specific project or professional challenge.
-      4. **Drift & Low-Value Detection**: If the candidate's response is drifting off-topic, contains sensitive personal venting, or is nonsensical (hallucinatory/stupid), DO NOT entertain the content. Instead, generate a **Redirective Probe** that acknowledges the drift and firmly steers them back to the professional context.
-      5. **Maintain Scrutiny Standards**: Regardless of the candidate's conversational direction, the probe must still scrutinize them against one of these core organizational constructs:
-         - Strategic Alignment: Navigating competing priorities, organizational changes, or future contributions.
-         - Stakeholder Management: Handling difficult interpersonal dynamics, team interrelations, or conflicting interests.
-         - Operational Integrity: Maintaining standards, ethics, and risk management within a high-pressure situational context.
-      
-      ### PSYCHOLOGICAL FRAMEWORK
-      - The question MUST be in layman's terms but remain deep and domain-specific.
-      - Adhere to psychological principles: Impression Management (detecting how they present themselves), Procedural Justice, or Social Identity Awareness.
-      - When applying Procedural Justice, ensure the probe reflects its six aspects (Lind et al., 1990): 1) Fairness (objective/neutral), 2) Voice (allowing expression of their view), 3) Validation (taking their view into account), 4) Respect (treating with dignity), 5) Motivation (genuine concern), and 6) Information (clarity on procedures).
-      - **Crucial for Information (Explanations)**: Provide brief explanations for *why* a question is being asked. Research shows that explanations in video/AI interviews significantly increase fairness perceptions and organizational attractiveness (Chapman et al., 2003; Folger et al., 2022; McCarthy et al., 2017; Basch & Melchers, 2019; Hausknecht et al., 2004).
-      - **Social Identity Awareness (Highhouse et al., 2007)**: When applicable, probe to determine if the candidate is driven by 'Value Expression' (intrinsic alignment with organizational values) or 'Social Recognition' (extrinsic desire to align with others for approval).
+
+      A) PROCEDURAL JUSTICE (Lind & Tyler, 1988; Lind et al., 1990)
+   The probe must reflect at least one of the six dimensions:
+   1. Voice       — does the candidate get to express their perspective?
+   2. Validation  — is their prior response acknowledged?
+   3. Respect     — is the tone dignified, never condescending?
+   4. Neutrality  — is the question objective and unbiased?
+   5. Motivation  — does it reflect genuine concern for the candidate?
+   6. Explanation — is a brief rationale provided for why it is asked?
+   ALWAYS populate the rationale field. Research shows rationales
+   significantly increase fairness perceptions in AI interviews
+   (Chapman et al., 2003; McCarthy et al., 2017; Basch & Melchers, 2019).
+
+B) IMPRESSION MANAGEMENT — GOFFMAN (1959)
+   Distinguish between the candidate's FRONT-STAGE presentation (curated,
+   rehearsed, socially managed) and BACK-STAGE signals (authentic,
+   candid, unguarded). When front-stage performance appears overly
+   rehearsed, probe to surface backstage content.
+   Note: this is Goffman's dramaturgical model — not a character judgement.
+
+C) SOCIAL IDENTITY AWARENESS (Highhouse et al., 2007)
+   SCOPE: Apply ONLY when the candidate is explicitly discussing their
+   motivation to join the target organisation — not general responses.
+   When applicable: probe whether they are driven by VALUE EXPRESSION
+   (intrinsic alignment with org values) or SOCIAL RECOGNITION
+   (extrinsic approval-seeking).
+
+D) SELF-DETERMINATION THEORY (Deci & Ryan, 2000)
+   Probes should elicit evidence of:
+   Autonomy (ownership, agency), Competence (mastery, depth),
+   Relatedness (stakeholder alignment, interpersonal logic).
+
+E) ALGORITHMIC AVERSION (Dietvorst et al., 2015; Logg et al., 2019)
+   If the candidate signals resistance to AI-mediated assessment
+   (e.g. 'I don't think a computer can judge this', 'this feels
+   unfair'), acknowledge their concern respectfully and invite them
+   to articulate their reasoning. Flag as psychologicalPrinciple:
+'Algorithmic Aversion'.
+
+═══════════════════════════════════════════════════════
+CONSTRAINTS
+═══════════════════════════════════════════════════════
+- NEVER generate generic questions (e.g. 'Tell me about a challenge')
+- NEVER use academic jargon in the question itself
+- NEVER hallucinate skills or experiences not in the transcript
+- ALWAYS write the probe in plain, accessible English
+- ALWAYS populate the rationale field
+- ONE probe only — not a list
+
+═══════════════════════════════════════════════════════
+FEW-SHOT EXEMPLARS
+═══════════════════════════════════════════════════════
+GOOD PROBE:
+  Transcript: 'I kept the team stable during the restructure by
+               being the anchor.'
+  Probe:      'You described yourself as the anchor — what does that
+               actually mean for you in practice? Can you tell me about
+               a moment when that anchor role was genuinely hard to hold?'
+  Rationale:  'I want to understand whether your stability was a
+               proactive leadership choice or a reactive response —
+               both are valid, but they tell me different things about
+               your agency under uncertainty.'
+
+BAD PROBE (never generate this):
+'Tell me about a time you showed leadership.'
+  Why it fails: generic, ignores candidate's own language entirely.
+
+    
       
       ### INPUT DATA
       Transcript: ${transcript}
@@ -75,33 +123,66 @@ export const analyzeProbeResponse = async (transcript: string, probe: Probe): Pr
       
       Provide insights into their strategic alignment, stakeholder management capabilities, and operational integrity based on their response to the organizational dilemma.
       
-      ### TRIARCHIC MERIT MODEL INTEGRATION
-      Evaluate the candidate's response against these three vectors:
-      1. **Autonomy**: Ability to take ownership and make independent decisions.
-      2. **Competence**: Technical proficiency and problem-solving depth.
-      3. **Relatedness**: Stakeholder alignment and collaborative intelligence.
       
-      ### ANALYSIS GUIDELINES
-      - **Interpretative Flexibility**: If the candidate uses metaphors or philosophical framing, evaluate the *underlying logic* relative to the core constructs. Do not penalize abstract language if it successfully addresses the strategic, stakeholder, or operational challenge.
-      - **Evidence-Based Evaluation**: Look for how they bridge their abstract beliefs to concrete professional actions or project examples.
-      - **Strict Relevance Audit**: If the response is nonsensical, "stupid," or completely out of context (e.g., talking about their lunch or personal drama), DO NOT attempt to find professional value in it. Label it as "low_value" or "out_of_context" in the integrityViolation field.
-      - **No Hallucinations**: If the response holds no value, do not hallucinate a score or a positive interpretation. Be honest about the lack of professional substance.
-      
-      Evaluate Impression Management (0-100 score) and provide a Procedural Justice note.
-      The Procedural Justice note MUST evaluate the interaction based on its six aspects (Lind et al., 1990): 1) Fairness (objectivity), 2) Voice (candidate's ability to express views), 3) Validation (views taken into account), 4) Respect (dignity), 5) Motivation (genuine concern), and 6) Information (clarity).
-      Also provide scores (0-100) for the Triarchic Merit Model vectors (Autonomy, Competence, Relatedness).
-      Evaluate Social Identity Awareness (Highhouse et al., 2007): Assess if the candidate is driven by 'Value Expression' (intrinsic) or 'Social Recognition' (extrinsic alignment with others). Provide scores (0-100) for both and a brief note.
-      
-      ### TONE & PSYCHOLOGICAL SAFETY
-      - Maintain a professional, constructive, and encouraging tone.
-      - Frame gaps in capabilities as "areas for development" or "opportunities for alignment."
-      - Avoid definitive negative labels; use supportive language that helps the candidate understand the organizational context they might be missing.
-      - Ensure the analysis feels like a helpful diagnostic tool rather than a harsh judgement.
+1. ORGANISATIONAL CONSTRUCTS
+   Assess strategic alignment, stakeholder management, and operational
+   integrity. If the response is nonsensical or off-topic, label it
+   honestly — do not hallucinate professional substance.
 
-      ### INTEGRITY & SAFETY AUDIT
-      - **CRITICAL**: Detect if the candidate uses abusive language, hate speech, or shares highly sensitive personal information (PII) about themselves or others.
-      - **CONTEXT AUDIT**: Detect if the response is "low_value" (nonsense/filler) or "out_of_context" (irrelevant to the probe).
-      - If detected, set integrityViolation.detected to true and provide a warning.
+2. SDT MERIT VECTORS (Deci & Ryan, 2000)
+   Score Autonomy, Competence, Relatedness (0–100 each) based on
+   verbal evidence only. Do not infer scores from tone alone.
+   - Autonomy:    Demonstrated agency, ownership, independent decisions
+   - Competence:  Technical depth, mastery, problem-solving ability
+   - Relatedness: Stakeholder alignment, interpersonal logic
+
+3. IMPRESSION MANAGEMENT — GOFFMAN (1959)
+   Evaluate the candidate's dramaturgical performance:
+   - impressionManagementScore (0–100): Degree of curated, front-stage
+     self-presentation. High = heavily managed/rehearsed presentation.
+     LOW score = more authentic, backstage disclosure.
+   - High front-stage is NOT inherently bad in an interview context.
+     Flag ONLY when strategic performance obscures substantive evidence.
+
+4. PROCEDURAL JUSTICE — SIX DIMENSIONS (Lind et al., 1990)
+   Score the candidate's experience of THIS probe interaction (0–100):
+   - voice:       Did the probe allow the candidate to express their view?
+   - validation:  Was the candidate's prior response acknowledged?
+   - respect:     Was the probe worded with dignity?
+   - neutrality:  Was the probe objective and free from bias?
+   - motivation:  Did the probe reflect genuine interest in the candidate?
+   - explanation: Was a rationale provided for why the probe was asked?
+   Also provide the proceduralJusticeNote as a holistic summary.
+
+5. SOCIAL IDENTITY AWARENESS (Highhouse et al., 2007)
+   SCOPE: Apply ONLY if the candidate discussed their motivation to
+   join the target organisation. If not applicable, explicitly note
+   this in the note field.
+   When applicable: score valueExpression and socialRecognition (0–100).
+
+6. ALGORITHMIC AVERSION (Dietvorst et al., 2015; Logg et al., 2019)
+   Scan for language signalling resistance to AI-mediated assessment.
+   Examples: scepticism about AI fairness, distrust, attempts to
+   game the system, dismissive language about automated feedback.
+   If detected, note it clearly — this is a critical confound variable
+   for the research study.
+
+7. STRICT RELEVANCE AUDIT
+   If the response is 'low_value' (nonsense/filler) or 'out_of_context'
+   (irrelevant to the probe), set integrityViolation accordingly.
+   Do NOT attempt to find professional value in a meaningless response.
+
+8. INTEGRITY & SAFETY AUDIT
+   Detect: abusive language, hate speech, sensitive PII.
+   If detected: set integrityViolation.detected: true.
+
+═══════════════════════════════════════════════════════
+TONE & PSYCHOLOGICAL SAFETY
+═══════════════════════════════════════════════════════
+- Frame gaps as 'areas for development' or 'opportunities for alignment'
+- NEVER use: 'failed', 'poor', 'unqualified', 'wrong'
+- Maintain the analysis as a diagnostic instrument, not a verdict
+
     `,
     config: {
       responseMimeType: "application/json",
