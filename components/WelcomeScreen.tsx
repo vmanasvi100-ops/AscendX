@@ -482,7 +482,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
             )}
         </div>
     );
-  </div>
 };
 
 // End of component
