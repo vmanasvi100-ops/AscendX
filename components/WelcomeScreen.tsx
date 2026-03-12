@@ -26,7 +26,7 @@ const DEFAULT_AUDIT_CRITERIA: RubricCriterion[] = [
 const HELP_CONTENT: Record<string, { text: string }> = {
     'timer-display': { text: "Choose a time awareness tool that fits your preference for tracking session duration and phase targets." },
     'live-tools': { text: "Activate optional cognitive scaffolds to reduce executive load during the session." },
-    'sensory-prefs': { text: "Customise interface visuals to ensure a predictable and low-stimulation environment." },
+    'sensory-prefs': { text: "Customize interface visuals to ensure a predictable and low-stimulation environment." },
     'motivation': { text: "Enable discrete markers of progress to track session milestones." },
     'accessibility': { text: "Enable structural font adjustments to improve legibility and reduce visual fatigue." },
     'predictive-engine': { text: "Uses the Triarchic Merit Model (Autonomy, Competence, Relatedness) and Bloom's Taxonomy to map Magnitude Gaps and predict friction points." },
