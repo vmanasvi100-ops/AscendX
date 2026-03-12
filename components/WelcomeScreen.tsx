@@ -242,11 +242,11 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                     <div className="flex justify-between items-start">
                          <div id="welcome-header">
                              <div className="flex items-center gap-3 mb-2">
-                                <h1 className="text-3xl font-bold text-slate-900" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Ascend </h1>
-                                <span className="bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border border-slate-200">Scientific Engine v3.2</span>
+                                <h1 className="text-3xl font-bold text-slate-900" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Ascend</h1>
+                                <span className="bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border border-slate-200"></span>
                              </div>
                             <p className="text-slate-600" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                Merit Vectoring (SDT) and Agency Shift Prediction.
+                                Your AI-powered interview coach — practice smarter, perform better
                             </p>
                         </div>
                         <div className="flex gap-2">
@@ -266,7 +266,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                             className={`p-6 rounded-2xl border-2 transition-all text-left ${!isPredictiveActive ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-100' : 'border-slate-100 hover:border-slate-300'}`}
                         >
                             <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1">PRACTICE WITH ASCEND</h3>
-                            <p className="text-xs text-slate-500">Your AI-powered interview coach — practice smarter, perform better.</p>
+                            <p className="text-xs text-slate-500">Step into a real interview experience tailored to your CV and the role you want</p>
                         </button>
                         <button 
                             onClick={() => setIsPredictiveActive(true)}
