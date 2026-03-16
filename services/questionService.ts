@@ -11,7 +11,7 @@ export const generateInitialQuestions = async (
   companyLink?: string
 ): Promise<Question[]> => {
   const model = "gemini-3-flash-preview";
-  
+
   const response = await ai.models.generateContent({
     model,
     contents: `

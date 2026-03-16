@@ -14,6 +14,8 @@ import { useSettings } from '../context/SettingsContext';
 interface Props { 
   criteria: RubricCriterion[]; 
   onInitiatePractice: (questions: Question[]) => void;
+  onMouseEnter?: React.MouseEventHandler;
+  onMouseLeave?: React.MouseEventHandler;
 }
 
 const MeritVectorBar = ({ label, value, color }: { label: string; value: number; color: string }) => (
@@ -31,7 +33,7 @@ const MeritVectorBar = ({ label, value, color }: { label: string; value: number;
   </div>
 );
 
-export default function ResumeCoach({ criteria, onInitiatePractice }: Props) {
+export default function ResumeCoach({ criteria, onInitiatePractice, onMouseEnter, onMouseLeave }: Props) {
   const { persistedAuditResult, setPersistedAuditResult } = useSettings();
   const [resumeText, setResumeText] = useState('');
   const [targetRole, setTargetRole] = useState('');
@@ -136,7 +138,7 @@ export default function ResumeCoach({ criteria, onInitiatePractice }: Props) {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6 bg-slate-900 rounded-[32px] border border-slate-800 shadow-2xl relative overflow-hidden animate-fade-in">
+    <div className="flex flex-col gap-6 p-6 bg-slate-900 rounded-[32px] border border-slate-800 shadow-2xl relative overflow-hidden animate-fade-in" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <div className="relative z-10 space-y-8">
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="space-y-1">
@@ -181,11 +183,11 @@ export default function ResumeCoach({ criteria, onInitiatePractice }: Props) {
                                         </button>
                                     </div>
                                     <div className="flex flex-wrap gap-2">
-                                        {result.biasMitigationSummary.map((m, i) => (
+                                        {result.keywordAudit?.vocabularyStrengths?.map((m, i) => (
                                             <span key={i} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-[9px] font-black uppercase tracking-widest">{m}</span>
                                         ))}
                                     </div>
-                                    <p className="text-sm leading-relaxed text-slate-300 font-medium bg-slate-800/40 p-8 rounded-3xl border border-slate-700">{result.summary}</p>
+                                    <p className="text-sm leading-relaxed text-slate-300 font-medium bg-slate-800/40 p-8 rounded-3xl border border-slate-700">{result.alignmentSummary}</p>
                                 </div>
                             </div>
                         </div>
@@ -226,9 +228,9 @@ export default function ResumeCoach({ criteria, onInitiatePractice }: Props) {
                             <div className="lg:col-span-2 space-y-8 bg-slate-800/40 p-10 rounded-[40px] border border-slate-800">
                                 <h3 className="text-xs font-black text-white uppercase tracking-widest">Magnitude Scaling (Triarchic Model)</h3>
                                 <div className="space-y-6">
-                                    <MeritVectorBar label="Autonomy" value={result.meritVectors.autonomy} color="text-blue-400" />
-                                    <MeritVectorBar label="Competence" value={result.meritVectors.competence} color="text-emerald-400" />
-                                    <MeritVectorBar label="Relatedness" value={result.meritVectors.relatedness} color="text-indigo-400" />
+                                    <MeritVectorBar label="Autonomy" value={result.meritVectors?.autonomy?.score || 0} color="text-blue-400" />
+                                    <MeritVectorBar label="Competence" value={result.meritVectors?.competence?.score || 0} color="text-emerald-400" />
+                                    <MeritVectorBar label="Relatedness" value={result.meritVectors?.relatedness?.score || 0} color="text-indigo-400" />
                                 </div>
                             </div>
                         </div>

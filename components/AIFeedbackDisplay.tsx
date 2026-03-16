@@ -1,8 +1,8 @@
 
 import React from 'react';
-import type { AIFeedback, FeedbackStyle } from '../types';
+import type { DetailedFeedback, FeedbackStyle } from '../types';
 
-const AIFeedbackDisplay = ({ feedback, isLoading, feedbackStyle }: { feedback: AIFeedback | null; isLoading: boolean; feedbackStyle: FeedbackStyle; }) => {
+const AIFeedbackDisplay = ({ feedback, isLoading, feedbackStyle }: { feedback: DetailedFeedback | null; isLoading: boolean; feedbackStyle: FeedbackStyle; }) => {
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center p-6 text-center bg-slate-50 rounded-lg h-full">
@@ -67,11 +67,11 @@ const AIFeedbackDisplay = ({ feedback, isLoading, feedbackStyle }: { feedback: A
                 <div>
                     <h4 className="font-semibold text-slate-700 mb-2">Overall Perspective</h4>
                     <p className="text-sm text-slate-600 p-3 bg-slate-50 rounded-md border border-slate-200">
-                        {feedback.overallImpression}
+                        {feedback.performanceSummary}
                     </p>
                 </div>
                 
-                {feedback.strengths.length > 0 && (
+                {feedback.strengths && feedback.strengths.length > 0 && (
                      <div>
                         <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                             <ThumbsUpIcon /> {strengthsTitle}
@@ -84,13 +84,13 @@ const AIFeedbackDisplay = ({ feedback, isLoading, feedbackStyle }: { feedback: A
                     </div>
                 )}
 
-                {improvementsTitle && feedback.areasForImprovement.length > 0 && (
+                {improvementsTitle && feedback.actionableSuggestions && feedback.actionableSuggestions.length > 0 && (
                      <div>
                         <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                             <LightbulbIcon /> {improvementsTitle}
                         </h4>
                         <ul className="space-y-2">
-                            {feedback.areasForImprovement.map((item, index) => (
+                            {feedback.actionableSuggestions.map((item, index) => (
                                  <li key={index} className="text-sm text-slate-600 p-3 bg-yellow-50 rounded-md border border-yellow-200">{item}</li>
                             ))}
                         </ul>

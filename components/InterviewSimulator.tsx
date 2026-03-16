@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Mic, MicOff, Video, VideoOff, Play, Square, 
-  ChevronRight, MessageSquare, BarChart3, 
+import {
+  Mic, MicOff, Video, VideoOff, Play, Square,
+  ChevronRight, MessageSquare, BarChart3,
   Target, Zap, AlertCircle, CheckCircle2,
   Settings, X, Maximize2, RefreshCw
 } from 'lucide-react';
@@ -14,24 +14,24 @@ import type { Question, RecordingStatus } from '../types';
 
 // Helper to encode audio for Gemini Live API
 function encodeAudio(bytes: Uint8Array) {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const { videoEnabled, dyslexiaFont, persistedAuditResult } = useSettings();
-  
+
   // Session State
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [transcript, setTranscript] = useState<string>("");
   const [aiResponse, setAiResponse] = useState<string>("Welcome to your mock interview. I'm your AI coach. When you're ready, click 'Start Session' and I'll begin the interview.");
   const [isAiThinking, setIsAiThinking] = useState(false);
-  
+
   // Media State
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -39,7 +39,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const sessionRef = useRef<any>(null);
   const audioQueue = useRef<Int16Array[]>([]);
   const isPlaying = useRef(false);
-  
+
   // Heuristics State
   const [pacing, setPacing] = useState(0); // WPM
   const [keywordsMatched, setKeywordsMatched] = useState<string[]>([]);
@@ -51,18 +51,18 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   // Audio Playback Logic
   const playNextInQueue = useCallback(async () => {
     if (audioQueue.current.length === 0 || isPlaying.current || !audioContextRef.current) return;
-    
+
     isPlaying.current = true;
     const pcmData = audioQueue.current.shift()!;
-    
+
     const float32Data = new Float32Array(pcmData.length);
     for (let i = 0; i < pcmData.length; i++) {
       float32Data[i] = pcmData[i] / 32768.0;
     }
-    
+
     const buffer = audioContextRef.current.createBuffer(1, float32Data.length, 24000);
     buffer.getChannelData(0).set(float32Data);
-    
+
     const source = audioContextRef.current.createBufferSource();
     source.buffer = buffer;
     source.connect(audioContextRef.current.destination);
@@ -79,14 +79,14 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       try {
         let s: MediaStream;
         try {
-          s = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "user", width: 1280, height: 720 }, 
-            audio: true 
+          s = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user", width: 1280, height: 720 },
+            audio: true
           });
         } catch (videoErr) {
           console.warn("Video failed, falling back to audio only:", videoErr);
-          s = await navigator.mediaDevices.getUserMedia({ 
-            audio: true 
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: true
           });
         }
         setStream(s);
@@ -109,7 +109,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    
+
     const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
@@ -117,7 +117,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
           console.log("AI Connection Established");
           const source = audioContextRef.current!.createMediaStreamSource(stream);
           const processor = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
-          
+
           processor.onaudioprocess = (e) => {
             if (status !== 'recording') return;
             const inputData = e.inputBuffer.getChannelData(0);
@@ -125,13 +125,13 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             for (let i = 0; i < inputData.length; i++) {
               int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
             }
-            const pcmBlob = { 
-              data: encodeAudio(new Uint8Array(int16.buffer)), 
-              mimeType: 'audio/pcm;rate=16000' 
+            const pcmBlob = {
+              data: encodeAudio(new Uint8Array(int16.buffer)),
+              mimeType: 'audio/pcm;rate=16000'
             };
             sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
           };
-          
+
           source.connect(processor);
           processor.connect(audioContextRef.current!.destination);
         },
@@ -174,8 +174,8 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         systemInstruction: `You are a professional, world-class recruitment auditor and interviewer. 
         
         CONTEXT:
-        - Candidate's Resume Summary: ${persistedAuditResult?.summary || 'Not provided'}
-        - Audit Insights: ${JSON.stringify(persistedAuditResult?.atsMapping || [])}
+        - Candidate's Resume Summary: ${persistedAuditResult?.alignmentSummary || 'Not provided'}
+        - Audit Insights: ${JSON.stringify(persistedAuditResult?.questionPrimingBrief || [])}
         - Current Question: ${currentQuestion.text}
         - Target Keywords: ${currentQuestion.keywords.join(', ')}
         
@@ -232,12 +232,12 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const analyzePacing = (text: string) => {
     const words = text.trim().split(/\s+/).length;
     // Simple WPM simulation
-    setPacing(prev => Math.round((prev + (words * 12)) / 2)); 
+    setPacing(prev => Math.round((prev + (words * 12)) / 2));
   };
 
   const checkKeywords = (text: string) => {
     const lowerText = text.toLowerCase();
-    const matches = currentQuestion.keywords.filter(kw => 
+    const matches = currentQuestion.keywords.filter(kw =>
       lowerText.includes(kw.toLowerCase()) && !keywordsMatched.includes(kw)
     );
     if (matches.length > 0) {
@@ -255,7 +255,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             </div>
             <div>
               <h1 className="text-4xl font-black text-white tracking-tight">Interview Complete</h1>
-              <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Coherence Audit Report</p>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Interview Feedback Report</p>
             </div>
           </div>
 
@@ -298,7 +298,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
   return (
     <div className={`h-screen w-screen bg-[#0A0A0B] text-slate-300 flex flex-col overflow-hidden ${dyslexiaFont ? 'font-dyslexia-friendly' : 'font-sans'}`}>
-      
+
       {/* Top Navigation Bar */}
       <header className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#0A0A0B]/80 backdrop-blur-md z-50">
         <div className="flex items-center gap-4">
@@ -326,20 +326,19 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
       {/* Main Content Area */}
       <main className="flex-1 flex overflow-hidden">
-        
+
         {/* Left Sidebar: Questions & Progress */}
         <aside className="w-80 border-r border-white/5 flex flex-col bg-[#0D0D0E]">
           <div className="p-6 border-b border-white/5">
             <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Interview Pipeline</h3>
             <div className="space-y-2">
               {interviewQuestions.map((q, idx) => (
-                <div 
-                  key={idx} 
-                  className={`p-3 rounded-xl border transition-all ${
-                    idx === currentQuestionIndex 
-                      ? 'bg-indigo-600/10 border-indigo-500/50 text-white' 
+                <div
+                  key={idx}
+                  className={`p-3 rounded-xl border transition-all ${idx === currentQuestionIndex
+                      ? 'bg-indigo-600/10 border-indigo-500/50 text-white'
                       : 'bg-white/2 border-white/5 opacity-40'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[9px] font-black uppercase tracking-widest">Question {idx + 1}</span>
@@ -356,13 +355,12 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
               <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Keyword Alignment</h3>
               <div className="flex flex-wrap gap-2">
                 {currentQuestion.keywords.map((kw, idx) => (
-                  <span 
-                    key={idx} 
-                    className={`px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${
-                      keywordsMatched.includes(kw) 
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                  <span
+                    key={idx}
+                    className={`px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${keywordsMatched.includes(kw)
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                         : 'bg-white/5 text-slate-500 border border-white/10'
-                    }`}
+                      }`}
                   >
                     {kw}
                   </span>
@@ -375,9 +373,8 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
               <div className="space-y-3">
                 {['Situation', 'Task', 'Action', 'Result'].map((phase, idx) => (
                   <div key={phase} className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-[10px] font-black ${
-                      idx === 0 ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'border-white/10 text-slate-600'
-                    }`}>
+                    <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-[10px] font-black ${idx === 0 ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'border-white/10 text-slate-600'
+                      }`}>
                       {phase[0]}
                     </div>
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${idx === 0 ? 'text-white' : 'text-slate-600'}`}>
@@ -392,16 +389,16 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
         {/* Center: Video & HUD */}
         <section className="flex-1 relative flex flex-col bg-black">
-          
+
           {/* Video Feed */}
           <div className="flex-1 relative overflow-hidden">
             {stream ? (
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                muted 
-                playsInline 
-                className="w-full h-full object-cover opacity-80 grayscale-[20%] scale-x-[-1]" 
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover opacity-80 grayscale-[20%] scale-x-[-1]"
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-[#0A0A0B]">
@@ -426,8 +423,8 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                   <span className="text-[10px] font-bold text-slate-500 mb-1">WPM</span>
                 </div>
                 <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
-                  <motion.div 
-                    className="h-full bg-indigo-500" 
+                  <motion.div
+                    className="h-full bg-indigo-500"
                     animate={{ width: `${Math.min(100, (pacing / 180) * 100)}%` }}
                   />
                 </div>
@@ -436,7 +433,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
               {/* AI Response Bubble */}
               <AnimatePresence>
                 {aiResponse && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute bottom-12 left-1/2 -translate-x-1/2 w-full max-w-2xl px-8"
@@ -479,7 +476,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
             <div className="flex items-center gap-4">
               {status === 'idle' ? (
-                <button 
+                <button
                   onClick={startSession}
                   className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-indigo-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-3"
                 >
@@ -488,14 +485,14 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                 </button>
               ) : (
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={stopSession}
                     className="px-6 py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-rose-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-3"
                   >
                     <Square className="w-4 h-4 fill-white" />
                     Stop
                   </button>
-                  <button 
+                  <button
                     onClick={finishInterview}
                     className="px-10 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-3"
                   >
@@ -526,7 +523,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
               <span className="text-[9px] font-black uppercase tracking-widest text-emerald-500">Real-time</span>
             </div>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
             <div className="space-y-6">
               {transcript ? (
@@ -550,8 +547,8 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                 <span className="text-[10px] font-black text-white">84%</span>
               </div>
               <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                <motion.div 
-                  className="h-full bg-emerald-500" 
+                <motion.div
+                  className="h-full bg-emerald-500"
                   initial={{ width: 0 }}
                   animate={{ width: '84%' }}
                 />

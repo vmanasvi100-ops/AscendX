@@ -35,11 +35,6 @@ export interface JobListing {
   isStealth?: boolean;
 }
 
-export interface MeritVectors {
-  autonomy: number;
-  competence: number;
-  relatedness: number;
-}
 
 export interface InternalBlueprint {
   operatingModel: string;
@@ -77,28 +72,39 @@ export interface MiniCaseStudy {
 }
 
 export interface AuditResult {
-  summary: string;
-  alignmentScore: number;
-  frictionPoints: string[];
-  meritVectors: MeritVectors;
-  internalWorkings: InternalBlueprint;
-  agencyShift: AgencyShiftMetrics;
-  atsMapping: ATSMapping[];
-  optimisedCV: {
-    professionalSummary: string;
-    bulletPointOptimizations: Array<{
-      original: string;
-      optimised: string;
-      logic: string;
-      bloomLevel: number;
-    }>;
+  roleAlignmentScore: number;
+  alignmentSummary: string;
+  keywordAudit: {
+    present: string[];
+    missing: string[];
+    vocabularyStrengths: string[];
   };
-  biasMitigationSummary: string[];
-  miniCaseStudy: MiniCaseStudy;
-  tailoredQuestions: Question[];
+  starEvidenceQuality: Array<{
+    roleTitle: string;
+    situation: 'evidenced' | 'partial' | 'implied' | 'missing';
+    task: 'evidenced' | 'partial' | 'implied' | 'missing';
+    action: 'evidenced' | 'partial' | 'implied' | 'missing';
+    result: 'evidenced' | 'partial' | 'implied' | 'missing';
+  }>;
+  coherenceFlags: Array<{
+    claim: string;
+    probeTarget: string;
+    priority: 'high' | 'medium' | 'low';
+  }>;
+  questionPrimingBrief: {
+    topCompetenciesToProbe: string[];
+    cvClaimsToVerify: string[];
+    strongestExperienceToLeverage: string;
+  };
+  cvCHCSignal: {
+    gc_estimate: 'strong' | 'moderate' | 'weak';
+    gq_estimate: 'strong' | 'moderate' | 'weak';
+    note: string;
+  };
 }
 
 export type TimerDisplay = 'progressBar' | 'countdown' | 'elapsed' | 'pacingAnchor';
+export type TimerFramingCondition = 'elapsed' | 'duration' | 'used';
 export type VisualFeedbackStyle = 'minimalist' | 'gentle' | 'textOnly';
 export type FeedbackStyle = 'direct' | 'suggestive' | 'pacing' | 'minimal';
 export type CoachMarkTheme = 'default' | 'calm';
@@ -123,10 +129,10 @@ export interface SupportiveAIFeedback {
   };
 }
 
-export type AnalyticsEventType = 
-  | 'session_start' | 'session_exit' | 'phase_complete' | 'break_start' 
-  | 'break_end' | 'integrity_warning' | 'sandbox_engaged' | 'promo_generated' 
-  | 'session_complete' | 'feedback_generated' | 'intent_survey_submitted' 
+export type AnalyticsEventType =
+  | 'session_start' | 'session_exit' | 'phase_complete' | 'break_start'
+  | 'break_end' | 'integrity_warning' | 'sandbox_engaged' | 'promo_generated'
+  | 'session_complete' | 'feedback_generated' | 'intent_survey_submitted'
   | 'scaffold_toggled' | 'data_synced' | 'data_exported';
 
 export interface AnalyticsEvent {
@@ -157,6 +163,8 @@ export interface Settings {
   participantId: string;
   condition: ExperimentCondition;
   cvText?: string;
+  timerFramingCondition: TimerFramingCondition;
+  isNervous: boolean;
 }
 
 // Fix: Added TourResettableSettings interface
@@ -178,31 +186,131 @@ export interface TourStep {
   title: string;
   content: string;
   placement: 'top' | 'bottom' | 'left' | 'right';
-  component: 'welcome' | 'interview';
+  component: 'welcome' | 'interview' | 'report';
   section: string;
   action?: 'START_INTERVIEW';
 }
 
-export interface TriarchicMeritAlignment {
-  analytical: { score: number; evidence: string };
-  creative: { score: number; evidence: string };
-  practical: { score: number; evidence: string };
-  correlationNote: string;
+// ─── AscendX Layer B Types — v5.0 ──────────────────────────────────
+export interface MeritVector {
+  score: number;
+  evidenceBasis: string;
+}
+
+export interface MeritVectors {
+  autonomy: MeritVector;
+  competence: MeritVector;
+  relatedness: MeritVector;
+  lowestVector: 'autonomy' | 'competence' | 'relatedness';
+  primarySuggestionAnchor: string;
+}
+
+export interface ProceduralJusticeDimension {
+  score: number;
+  evidenceBasis: string;
+}
+
+export interface ProceduralJusticeDimensions {
+  voice: ProceduralJusticeDimension;
+  validation: ProceduralJusticeDimension;
+  respect: ProceduralJusticeDimension;
+  neutrality: ProceduralJusticeDimension;
+  motivation: ProceduralJusticeDimension;
+  explanation: ProceduralJusticeDimension;
+  overallPJNote: string;
+}
+
+export interface ImpressionManagementScore {
+  frontStageScore: number;
+  backStageScore: number;
+  dominantMode: 'front_stage' | 'back_stage' | 'balanced';
+  authenticitySignal: string;
+  feedbackImplication: string;
+}
+
+export interface AlgorithmicAversionSignal {
+  aversionDetected: boolean;
+  aversionEvidence: string | null;
+  feedbackImplication: string;
+}
+
+export interface SocialIdentityAwareness {
+  activated: boolean;
+  valueExpressionScore: number | null;
+  socialRecognitionScore: number | null;
+  dominantMotivation: 'value_expression' | 'social_recognition' | null;
+  scopeNote: string;
+}
+
+// ─── NEW v5.0: CHC Cognitive Dimensions (replaces Sternberg) ────────
+export interface CHCDimension {
+  score: number | null;
+  evidenceBasis: string;
+  validityDisclaimer: string;
+}
+
+export interface CHCCognitiveDimensions {
+  crystallisedIntelligence: CHCDimension;  // Gc
+  fluidIntelligence: CHCDimension;          // Gf
+  practicalReasoning: CHCDimension;         // Gq
+  overallCHCNote: string;
+  researchNote: string;
+}
+
+// ─── NEW v5.0: Scaffolded Learning Signal (Vygotsky / Wood et al.) ──
+export interface ScaffoldedLearningSignal {
+  zpdProgressionObservation: string;
+  scaffoldDependency: {
+    score: number;
+    interpretation: 'scaffolded' | 'independent' | 'declining';
+    researchNote: string;
+  };
+  zoneOfProximalDevelopmentEstimate: {
+    lowerBoundary: string;
+    upperBoundary: string;
+    developmentGap: string;
+    practiceRecommendation: string;
+  };
+  phasingEffectiveness: {
+    phase1Score: number | null;
+    phase2Score: number | null;
+    phase3Score: number | null;
+    trajectory: 'improving' | 'stable' | 'declining' | 'variable';
+  };
+}
+
+// ─── COMPLETE LayerBSignals interface ────────────────────────────────
+export interface LayerBSignals {
+  meritVectors: MeritVectors;
+  proceduralJusticeDimensions: ProceduralJusticeDimensions;
+  impressionManagementScore: ImpressionManagementScore;
+  algorithmicAversionSignal: AlgorithmicAversionSignal;
+  socialIdentityAwareness: SocialIdentityAwareness;
+  chcCognitiveDimensions: CHCCognitiveDimensions;
+  scaffoldedLearningSignal: ScaffoldedLearningSignal;
+  psychologicalSafetyScore: {
+    score: number;
+    checklist: Record<string, boolean>;
+  };
+  biasAndFairnessNote: {
+    potentialBiasSignals: string[];
+    mitigationActions: string[];
+    overallFairnessNote: string;
+  };
+  maskedTranscript: {
+    text: string;
+  };
 }
 
 export interface DetailedFeedback {
   noData?: boolean;
+
+  // Layer A - Candidate Facing
   performanceSummary: string;
-  rubrics: {
-    fluency: number;
-    technicalCorrectness: number;
-    confidence: number;
-    culturalAlignment: number;
-  };
+  overallStarSynthesis: string;
   strengths: string[];
   weaknesses: string[];
   actionableSuggestions: string[];
-  biasAndFairnessNote: string;
   starAnalysis: {
     situation: string;
     task: string;
@@ -217,51 +325,228 @@ export interface DetailedFeedback {
     certifications: string[];
     nextSteps: string[];
   };
+  rubrics: {
+    starCompletion: number;
+    evidenceSpecificity: number;
+    roleClarity: number;
+    jdAlignment: number;
+    communicationClarity: number;
+    justifications: {
+      starCompletion: string;
+      evidenceSpecificity: string;
+      roleClarity: string;
+      jdAlignment: string;
+      communicationClarity: string;
+    }
+  };
+
+  // Layer B - Researcher Signals
+  meritVectors?: {
+    autonomy: { score: number; evidenceBasis: string };
+    competence: { score: number; evidenceBasis: string };
+    relatedness: { score: number; evidenceBasis: string };
+    lowestVector: 'autonomy' | 'competence' | 'relatedness';
+    primarySuggestionAnchor: string;
+  };
+  proceduralJusticeDimensions?: {
+    voice: { score: number; evidenceBasis: string };
+    validation: { score: number; evidenceBasis: string };
+    respect: { score: number; evidenceBasis: string };
+    neutrality: { score: number; evidenceBasis: string };
+    motivation: { score: number; evidenceBasis: string };
+    explanation: { score: number; evidenceBasis: string };
+    overallPJNote: string;
+  };
+  impressionManagementScore?: {
+    frontStageScore: number;
+    backStageScore: number;
+    dominantMode: 'front_stage' | 'back_stage' | 'balanced';
+    authenticitySignal: string;
+    feedbackImplication: string;
+  };
+  algorithmicAversionSignal?: {
+    aversionDetected: boolean;
+    aversionEvidence: string | null;
+    feedbackImplication: string;
+  };
+  socialIdentityAwareness?: {
+    activated: boolean;
+    valueExpressionScore: number | null;
+    socialRecognitionScore: number | null;
+    dominantMotivation: 'value_expression' | 'social_recognition' | null;
+    scopeNote: string;
+  };
+  chcCognitiveDimensions?: {
+    crystallisedIntelligence: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    fluidIntelligence: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    practicalReasoning: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    overallCHCNote: string;
+    researchNote: string;
+  };
+  scaffoldedLearningSignal?: {
+    zpdProgressionObservation: string;
+    scaffoldDependency: { score: number; interpretation: 'scaffolded' | 'independent' | 'declining'; researchNote: string };
+    zoneOfProximalDevelopmentEstimate: { lowerBoundary: string; upperBoundary: string; developmentGap: string; practiceRecommendation: string };
+    phasingEffectiveness: { phase1Score: number | null; phase2Score: number | null; phase3Score: number | null; trajectory: 'improving' | 'stable' | 'declining' | 'variable' };
+  };
+  psychologicalSafetyScore?: {
+    score: number;
+    checklist: {
+      taskLevelOnly: boolean;
+      noDemotivatorsUsed: boolean;
+      rationalePresent: boolean;
+      atLeastFiveSuggestions: boolean;
+      strengthsFirst: boolean;
+      warmTone: boolean;
+    };
+  };
+  biasAndFairnessNote?: string;
   integrityViolation?: {
     detected: boolean;
-    type: 'abusive_language' | 'sensitive_information' | 'none';
+    type: 'abusive_language' | 'sensitive_information' | 'low_value' | 'out_of_context';
     note: string;
   };
-  maskedTranscript: string;
-  triarchicMeritAlignment?: TriarchicMeritAlignment;
-  meritVectors?: MeritVectors;
+  maskedTranscript: {
+    text: string;
+  };
 }
 
 export interface Probe {
-  id: string;
-  question: string;
-  focus: 'strategic_alignment' | 'stakeholder_management' | 'operational_integrity';
-  psychologicalPrinciple: 'Impression Management' | 'Procedural Justice' | 'Social Identity Awareness';
+  id?: string;
+  probe: string;
+  probe_type: 'CLARIFYING' | 'CONCRETE' | 'DEEPENING' | 'REDIRECTING' | 'STRATEGIC' | 'INSUFFICIENT_CONTEXT';
   rationale: string;
+  contextual_anchor: string;
+  scaffold_phase: 1 | 2 | 3;
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  question_type: 'INTRODUCTORY_ALIGNMENT' | 'CORE_COMPETENCY' | 'STRATEGIC_HIGH_STAKES';
+  zpd_note: string;
 }
 
 export interface ProbeAnalysis {
-  strategicAlignment: string;
-  stakeholderManagement: string;
-  operationalIntegrity: string;
-  impressionManagementScore: number; // 0-100
-  proceduralJusticeNote: string;
-  socialIdentityAwareness?: {
-    valueExpression: number; // 0-100
-    socialRecognition: number; // 0-100
-    note: string;
+  probe_successful: boolean;
+  depth_delta: 'increased' | 'same' | 'decreased';
+  evidence_added: string;
+  star_status: {
+    situation: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+    task: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+    action: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+    result: 'complete' | 'partial' | 'missing' | 'not_yet_required';
   };
-  integrityViolation?: {
+  weakest_star_component: 'situation' | 'task' | 'action' | 'result' | null;
+  contextual_anchor: string;
+  suggested_next_probe_type: 'CLARIFYING' | 'CONCRETE' | 'DEEPENING' | 'STRATEGIC' | null;
+  sdt_signals: {
+    autonomy_language: 'present' | 'absent';
+    competence_language: 'present' | 'absent';
+    relatedness_language: 'present' | 'absent';
+  };
+  scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent';
+  interpretation: string;
+  pj_observations: string[];
+  novel_claim_introduced: boolean;
+  proceed: boolean;
+  reason: string;
+  verbatimProbe?: string;
+  coaching_tip?: string;
+
+  // Continuous Analysis Signals (Returned every time)
+  merit_vectors: {
+    autonomy: number;
+    competence: number;
+    relatedness: number;
+    lowest_vector: 'autonomy' | 'competence' | 'relatedness';
+  };
+  goffman_scores: {
+    front_stage: number;
+    back_stage: number;
+  };
+  chc_signals: {
+    gc: 'strong' | 'moderate' | 'weak';
+    gf: 'strong' | 'moderate' | 'weak';
+    gq: 'strong' | 'moderate' | 'weak';
+    lowest_signal: 'gc' | 'gf' | 'gq';
+  };
+
+  algorithmic_aversion: {
     detected: boolean;
-    type: 'abusive_language' | 'sensitive_information' | 'none';
-    note: string;
+    evidence: string | null;
   };
+}
+
+export interface QuestionSummaryReport {
+  questionId: string;
+  questionText: string;
+  answerOverview: string; // Section 1
+  strengths: string[];    // Section 2
+  developmentPoints: {    // Section 3
+    gap: string;
+    whyItMatters: string;
+    instruction: string;
+  }[];
+  probeEngagement: string; // Section 4
+  practiceTask: string;   // Section 5
+  timestamp: number;
+  allProbeAnalyses?: ProbeAnalysis[];
+}
+
+export interface QuestionDataAccumulator {
+  questionId: string;
+  transcript: string;
+  phaseAnalyses: ProbeAnalysis[];
+  probeAnalyses: ProbeAnalysis[];
+  timerFramingCondition: TimerFramingCondition;
+  responseDurations: {
+    actOne: number;
+    probes: number[];
+  };
+}
+
+export interface Step0Signals {
+  sdt_merit_vectors: {
+    autonomy: number;
+    competence: number;
+    relatedness: number;
+    lowest_merit_vector: 'autonomy' | 'competence' | 'relatedness';
+  };
+  goffman_impression_management: {
+    front_stage_score: number;
+    back_stage_score: number;
+  };
+  algorithmic_aversion: {
+    aversion_detected: boolean;
+    aversion_evidence: string | null;
+  };
+  highhouse_social_identity: {
+    activated: boolean;
+    value_expression_score: number | null;
+    social_recognition_score: number | null;
+    dominant_motivation: 'value_expression' | 'social_recognition' | null;
+  };
+  chc_cognitive_first_pass: {
+    gc_signal: 'strong' | 'moderate' | 'weak';
+    gf_signal: 'strong' | 'moderate' | 'weak';
+    gq_signal: 'strong' | 'moderate' | 'weak';
+    lowest_chc_signal: 'gc' | 'gf' | 'gq';
+  };
+  scaffold_dependency_first_pass: {
+    phase1_quality: number | null;
+    phase3_quality: number | null;
+    scaffold_dependency_estimate: 'high' | 'moderate' | 'low' | 'insufficient_data';
+  };
+  psychological_safety_score: number;
 }
 
 export interface Requirement {
-    id: string;
-    text: string;
-    linkedKeywords: string[];
+  id: string;
+  text: string;
+  linkedKeywords: string[];
 }
 
+
 export interface Question {
-    text: string;
-    keywords: string[];
-    requirements: Requirement[];
-    difficulty?: 'easy' | 'medium' | 'hard';
+  text: string;
+  keywords: string[];
+  requirements: Requirement[];
+  difficulty?: 'easy' | 'medium' | 'hard';
 }

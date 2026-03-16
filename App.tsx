@@ -17,7 +17,7 @@ const HardwareConsentModal = ({ onAllow, onClose, error, isLoading }: { onAllow:
   const canProceed = cameraConsent && micConsent;
 
   return (
-    <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[9000] animate-fade-in p-4" aria-modal="true" role="dialog">
+    <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" aria-modal="true" role="dialog">
       <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-lg w-full border border-slate-200">
         <div className="flex items-center gap-4 mb-6">
             <div className="p-3 bg-blue-100 rounded-2xl text-blue-600">
@@ -211,6 +211,10 @@ const AppContent: React.FC = () => {
     const currentStep = tourSteps[tourStep];
     if (currentStep.action === 'START_INTERVIEW') {
       startInterview();
+    } else if (tourStep === tourSteps.length - 1) {
+      // Tour finished! Return to welcome screen for fresh start/configuration
+      endTour();
+      setAppState('welcome');
     } else {
       nextTourStep();
     }
@@ -257,10 +261,10 @@ const AppContent: React.FC = () => {
       )}
 
       {/* Copyright Watermark */}
-      <div className="fixed bottom-4 right-6 z-[10000] pointer-events-none select-none opacity-20 hover:opacity-40 transition-opacity">
+      <div className="fixed bottom-3 right-5 z-[10000] pointer-events-none select-none opacity-20 hover:opacity-40 transition-opacity">
         <div className="flex flex-col items-end">
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-900">© 2026 ASCEND: COHERENCE AUDITOR</p>
-          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Confidential Proprietary System • All Rights Reserved</p>
+          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-400">© 2026 ASCEND: Practice Smart, Perform Better</p>
+          <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Confidential Proprietary System • All Rights Reserved</p>
         </div>
       </div>
     </div>

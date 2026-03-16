@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import type { Settings, TimerDisplay, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult } from '../types';
+import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult } from '../types';
 import { tourSteps, interviewQuestions } from '../data';
 
 interface SettingsContextType extends Settings {
@@ -19,6 +19,8 @@ interface SettingsContextType extends Settings {
   setCvText: (text: string) => void;
   activeQuestions: Question[];
   setActiveQuestions: (questions: Question[]) => void;
+  timerFramingCondition: TimerFramingCondition;
+  setTimerFramingCondition: (condition: TimerFramingCondition) => void;
   
   // Persistence for Return Navigation
   persistedAuditResult: AuditResult | null;
@@ -84,6 +86,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [speechRate, setSpeechRate] = useState<SpeechRate>(1);
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [cvText, setCvText] = useState("");
+  const [timerFramingCondition, setTimerFramingCondition] = useState<TimerFramingCondition>('elapsed');
 
   // Return Persistence
   const [persistedAuditResult, setPersistedAuditResult] = useState<AuditResult | null>(null);
@@ -138,6 +141,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     dyslexiaFont, setDyslexiaFont, visualFeedback, setVisualFeedback, audioCues, setAudioCues,
     gamification, setGamification, coachMarkTheme, setCoachMarkTheme, readAloud, setReadAloud,
     speechRate, setSpeechRate, videoEnabled, setVideoEnabled, cvText, setCvText, activeQuestions, setActiveQuestions,
+    timerFramingCondition, setTimerFramingCondition,
     persistedAuditResult, setPersistedAuditResult, isPredictiveActive, setIsPredictiveActive,
     isTourActive, tourStep, startTour, nextTourStep, jumpToTourStep, endTour,
   };

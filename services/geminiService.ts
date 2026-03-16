@@ -10,29 +10,29 @@ import { RubricCriterion, AuditResult } from "../types";
 export const sanitizeUrl = (url: string) => {
   if (!url) return '';
   let clean = url.trim().split(/\s+/)[0];
-  
+
   // Resolve Google Redirects
   if (clean.includes('google.com/url?q=')) {
     try {
       const urlObj = new URL(clean);
       const param = urlObj.searchParams.get('q');
       if (param) clean = param;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Prune ATS deep-links to land on ROOT Careers Pages
   const atsPattern = /(boards\.greenhouse\.io|jobs\.lever\.co|workdayjobs\.com|smartrecruiters\.com|workable\.com|myworkdayjobs\.com)/i;
   const deepJobPattern = /(\/jobs\/\d+)|(\/j\/[A-Z0-9]+)|(\/view\/\d+)|(\/inst\/\w+)/i;
-  
+
   if (atsPattern.test(clean)) {
-    clean = clean.split('?')[0]; 
-    clean = clean.replace(deepJobPattern, ''); 
+    clean = clean.split('?')[0];
+    clean = clean.replace(deepJobPattern, '');
   }
 
   clean = clean.replace(/[\[\(][^\]\)]*[\]\)]+$/g, '');
   clean = clean.replace(/[.,!;:)\]]+$/, '');
   clean = clean.replace(/[\[\]\(\)]/g, '');
-  
+
   if (clean && !clean.startsWith('http')) {
     clean = 'https://' + clean;
   }
@@ -65,22 +65,67 @@ export const analyzeResume = async (
   deepThink: boolean
 ): Promise<AuditResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const contentPart = typeof content === 'string' 
-    ? { text: `CV:\n${content}` } 
+  const contentPart = typeof content === 'string'
+    ? { text: `CV:\n${content}` }
     : { inlineData: { data: content.data, mimeType: content.mimeType } };
 
-  const systemPrompt = `Expert recruitment auditor. Perform 2-Stage clinical optimization for ${targetRole} at ${companyName}.
-  PHASE 1 (ATS Standards): Alignment Index based on Merit Vectors (Autonomy, Competence, Relatedness).
-  PHASE 2 (Coaching Blueprint): Internal Operating Model Prediction, Comm Style, and Unwritten Rules.
-  Map the Magnitude Gap and identify prestige proxies. 
-  
-  ### TONE & PSYCHOLOGICAL SAFETY
-  - Maintain a professional, constructive, and highly encouraging tone.
-  - Frame gaps as "growth opportunities" or "alignment refinements."
-  - Avoid demotivating language like "failed," "unqualified," or "poor."
-  - The goal is to empower the candidate to bridge the gap while feeling supported.
-  
-  OUTPUT JSON ONLY.`;
+  const systemPrompt = `You are AscendX, an expert occupational psychologist and career coach.
+Analyse the candidate's CV against the target role and generate a structured
+coherence audit. Return JSON only — no preamble, no markdown.
+
+CV CONTENT: ${contentPart.text || 'Provided'}
+TARGET ROLE: ${targetRole}
+COMPANY: ${companyName}
+JOB DESCRIPTION: ${jobDescription}
+
+═══════════════════════════════════════════════════════════════════
+ANALYSIS TASKS
+═══════════════════════════════════════════════════════════════════
+
+1. ALIGNMENT SCORE
+   roleAlignmentScore: 0–100
+   alignmentSummary: 2 sentences. What makes this candidate competitive
+   for this specific role? What is the primary gap?
+
+2. KEYWORD AUDIT
+   Present in CV and JD: string[]  // keywords appearing in both
+   In JD but missing from CV: string[]  // gaps to target in session
+   Candidate vocabulary strengths: string[]  // strong terminology to leverage
+
+3. STAR EVIDENCE PRE-ASSESSMENT
+   For each main role listed in CV, assess:
+   starEvidenceQuality: {
+     roleTitle: string,
+     situation: 'evidenced' | 'partial' | 'implied' | 'missing',
+     task: 'evidenced' | 'partial' | 'implied' | 'missing',
+     action: 'evidenced' | 'partial' | 'implied' | 'missing',
+     result: 'evidenced' | 'partial' | 'implied' | 'missing'
+   }[]
+
+4. COHERENCE FLAGS
+   Identify any potential misalignments to probe in session:
+   coherenceFlags: {
+     claim: string,           // what the CV states
+     probeTarget: string,     // what the session should verify
+     priority: 'high' | 'medium' | 'low'
+   }[]
+
+5. QUESTION PRIMING BRIEF
+   A brief for the question generator — top 3 competency areas to probe,
+   top 2 CV claims to verify, and the strongest experience to build on.
+   questionPrimingBrief: {
+     topCompetenciesToProbe: string[],
+     cvClaimsToVerify: string[],
+     strongestExperienceToLeverage: string
+   }
+
+6. CHC FIRST-PASS FROM CV (pre-session signal)
+   Based on CV vocabulary and evidence quality only:
+   cvCHCSignal: {
+     gc_estimate: 'strong' | 'moderate' | 'weak',  // knowledge depth
+     gq_estimate: 'strong' | 'moderate' | 'weak',  // result specificity
+     note: string
+   }`;
 
   const response = await ai.models.generateContent({
     model: deepThink ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
@@ -90,45 +135,71 @@ export const analyzeResume = async (
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          summary: { type: Type.STRING },
-          alignmentScore: { type: Type.NUMBER },
-          frictionPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-          meritVectors: {
-            type: Type.OBJECT,
-            properties: { autonomy: { type: Type.NUMBER }, competence: { type: Type.NUMBER }, relatedness: { type: Type.NUMBER } }
-          },
-          internalWorkings: {
+          roleAlignmentScore: { type: Type.NUMBER },
+          alignmentSummary: { type: Type.STRING },
+          keywordAudit: {
             type: Type.OBJECT,
             properties: {
-              operatingModel: { type: Type.STRING },
-              commStyle: { type: Type.STRING },
-              decisionMaking: { type: Type.STRING },
-              unwrittenRules: { type: Type.ARRAY, items: { type: Type.STRING } }
+              present: { type: Type.ARRAY, items: { type: Type.STRING } },
+              missing: { type: Type.ARRAY, items: { type: Type.STRING } },
+              vocabularyStrengths: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ["present", "missing", "vocabularyStrengths"]
+          },
+          starEvidenceQuality: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                roleTitle: { type: Type.STRING },
+                situation: { type: Type.STRING, enum: ['evidenced', 'partial', 'implied', 'missing'] },
+                task: { type: Type.STRING, enum: ['evidenced', 'partial', 'implied', 'missing'] },
+                action: { type: Type.STRING, enum: ['evidenced', 'partial', 'implied', 'missing'] },
+                result: { type: Type.STRING, enum: ['evidenced', 'partial', 'implied', 'missing'] }
+              },
+              required: ["roleTitle", "situation", "task", "action", "result"]
             }
           },
-          agencyShift: {
-            type: Type.OBJECT,
-            properties: { currentAgencyLevel: { type: Type.NUMBER }, targetAgencyLevel: { type: Type.NUMBER }, shiftPercentage: { type: Type.NUMBER }, magnitudeGap: { type: Type.STRING } }
-          },
-          atsMapping: {
+          coherenceFlags: {
             type: Type.ARRAY,
-            items: { type: Type.OBJECT, properties: { category: { type: Type.STRING }, criterion: { type: Type.STRING }, evidenceFound: { type: Type.STRING }, strength: { type: Type.STRING } } }
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                claim: { type: Type.STRING },
+                probeTarget: { type: Type.STRING },
+                priority: { type: Type.STRING, enum: ['high', 'medium', 'low'] }
+              },
+              required: ["claim", "probeTarget", "priority"]
+            }
           },
-          optimisedCV: {
+          questionPrimingBrief: {
             type: Type.OBJECT,
-            properties: { professionalSummary: { type: Type.STRING }, bulletPointOptimizations: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { original: { type: Type.STRING }, optimised: { type: Type.STRING }, logic: { type: Type.STRING }, bloomLevel: { type: Type.NUMBER } } } } }
+            properties: {
+              topCompetenciesToProbe: { type: Type.ARRAY, items: { type: Type.STRING } },
+              cvClaimsToVerify: { type: Type.ARRAY, items: { type: Type.STRING } },
+              strongestExperienceToLeverage: { type: Type.STRING }
+            },
+            required: ["topCompetenciesToProbe", "cvClaimsToVerify", "strongestExperienceToLeverage"]
           },
-          biasMitigationSummary: { type: Type.ARRAY, items: { type: Type.STRING } },
-          miniCaseStudy: {
+          cvCHCSignal: {
             type: Type.OBJECT,
-            properties: { title: { type: Type.STRING }, context: { type: Type.STRING }, tasks: { type: Type.ARRAY, items: { type: Type.STRING } }, expectedSolutions: { type: Type.STRING }, feedbackRationale: { type: Type.STRING } }
-          },
-          tailoredQuestions: {
-            type: Type.ARRAY,
-            items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, keywords: { type: Type.ARRAY, items: { type: Type.STRING } }, requirements: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, text: { type: Type.STRING }, linkedKeywords: { type: Type.ARRAY, items: { type: Type.STRING } } } } } } }
+            properties: {
+              gc_estimate: { type: Type.STRING, enum: ['strong', 'moderate', 'weak'] },
+              gq_estimate: { type: Type.STRING, enum: ['strong', 'moderate', 'weak'] },
+              note: { type: Type.STRING }
+            },
+            required: ["gc_estimate", "gq_estimate", "note"]
           }
         },
-        required: ["summary", "alignmentScore", "meritVectors", "internalWorkings", "atsMapping", "optimisedCV", "miniCaseStudy", "tailoredQuestions"]
+        required: [
+          "roleAlignmentScore",
+          "alignmentSummary",
+          "keywordAudit",
+          "starEvidenceQuality",
+          "coherenceFlags",
+          "questionPrimingBrief",
+          "cvCHCSignal"
+        ]
       }
     }
   });
@@ -222,10 +293,10 @@ export const extractJobListings = async (text: string) => {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
-          properties: { 
-            title: { type: Type.STRING }, 
-            company: { type: Type.STRING }, 
-            url: { type: Type.STRING }, 
+          properties: {
+            title: { type: Type.STRING },
+            company: { type: Type.STRING },
+            url: { type: Type.STRING },
             category: { type: Type.STRING },
             ghostProbability: { type: Type.NUMBER },
             trapScore: { type: Type.NUMBER }
