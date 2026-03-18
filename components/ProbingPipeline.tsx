@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Brain, Target, ShieldCheck, Sparkles, ChevronRight, Activity, ArrowRight, UserCheck, AlertCircle, Users, BarChart3, ShieldAlert, TrendingUp, TrendingDown, MessageSquare } from 'lucide-react';
+import { Brain, Target, ShieldCheck, Sparkles, ChevronRight, Activity, ArrowRight, UserCheck, AlertCircle, Users, BarChart3, ShieldAlert, TrendingUp, TrendingDown, MessageSquare, Award } from 'lucide-react';
 import { Probe, ProbeAnalysis } from '../types';
 import ProbingReport from './ProbingReport';
 
@@ -10,6 +10,8 @@ interface ProbingPipelineProps {
   isGenerating: boolean;
   revealCountdown?: number;
   participantId?: string;
+  onSwitchTab?: (tab: 'plan' | 'notes' | 'transcript' | 'insights' | 'report') => void;
+  reassuringMessage?: string;
 }
 
 const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
@@ -17,7 +19,9 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
   analysis,
   isGenerating,
   revealCountdown = 0,
-  participantId
+  participantId,
+  onSwitchTab,
+  reassuringMessage
 }) => {
   const [activeTab, setActiveTab] = useState<'probe' | 'analysis'>('probe');
   const [showFullReport, setShowFullReport] = useState(false);
@@ -52,6 +56,16 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
             Insights
           </button>
         </div>
+
+        {activeTab === 'analysis' && onSwitchTab && (
+          <button
+            onClick={() => onSwitchTab('plan')}
+            className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all border border-indigo-100"
+          >
+            <ChevronRight size={12} className="rotate-180" />
+            See PLAN
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 custom-scrollbar relative">
@@ -103,7 +117,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                 </div>
                 <div className="space-y-3">
                   <p className="text-sm font-black uppercase tracking-widest text-indigo-600 animate-pulse">
-                    Relax while the probing question is being prepared
+                    {reassuringMessage || "Relax while the probing question is being prepared"}
                   </p>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
                     You are doing well. Stay focused on your core logic.
@@ -127,7 +141,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                   <div className="w-16 h-16 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
                   <div className="space-y-4">
                     <p className="text-sm font-black uppercase tracking-widest text-indigo-600 animate-pulse">
-                      Relax while the probing question is being prepared
+                      {reassuringMessage || "Relax while the probing question is being prepared"}
                     </p>
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-widest leading-relaxed max-w-xs">
                       You are doing well. Stay focused on your core logic.
@@ -212,7 +226,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                   </div>
                   <div className="pl-8 border-l-2 border-white/20">
                     <p className="text-[11px] font-black uppercase tracking-widest leading-tight">
-                      Relax while the probing question is being prepared
+                      {reassuringMessage || "Relax while the probing question is being prepared"}
                     </p>
                     <p className="text-[9px] font-bold opacity-80 uppercase tracking-tighter mt-1">
                       You are doing well. Stay focused.
@@ -308,6 +322,39 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                   </p>
                 </div>
               </div>
+
+              {/* Coherence Coach Guidance */}
+              {analysis.coaching_guidance && (
+                <div className="bg-indigo-600 text-white rounded-[40px] p-8 shadow-xl shadow-indigo-900/20 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform">
+                    <Award size={120} />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-white/20 rounded-xl">
+                        <Sparkles size={18} />
+                      </div>
+                      <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-100">Coherence Coach Guidance</h4>
+                    </div>
+                    
+                    <div className="mb-6">
+                      <span className="inline-block px-3 py-1 bg-white/10 rounded-full text-[9px] font-black uppercase tracking-widest mb-2 border border-white/10">
+                        Target Gap: {analysis.coaching_guidance.framework_gap}
+                      </span>
+                      <p className="text-sm font-bold leading-tight">
+                        {analysis.coaching_guidance.instruction}
+                      </p>
+                    </div>
+
+                    <div className="p-5 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-indigo-200 mb-2">Try saying something like:</p>
+                      <p className="text-xs font-medium italic leading-relaxed text-white">
+                        "{analysis.coaching_guidance.example_phrase}"
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Procedural Justice Observations (Communicative Precision) */}
               {analysis.pj_observations && analysis.pj_observations.length > 0 && (

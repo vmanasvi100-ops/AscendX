@@ -2,7 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Probe, ProbeAnalysis, QuestionDataAccumulator, QuestionSummaryReport } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const getAI = () => {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  return new GoogleGenAI({ apiKey });
+};
 
 export interface GenerateProbeParams {
   candidateId: string;
@@ -20,15 +23,17 @@ export interface GenerateProbeParams {
 }
 
 export const generateProbe = async (params: GenerateProbeParams): Promise<Probe> => {
+  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
   const response = await ai.models.generateContent({
     model,
     contents: [
       {
-        role: 'user', // System instruction as a user turn for contents[0]
-        parts: [{
-          text: `You are AscendX, an expert AI interview coach grounded in occupational psychology.
+        role: 'user',
+        parts: [
+          {
+            text: `You are AscendX, an expert AI interview coach grounded in occupational psychology.
 Your role is to generate a single, high-quality adaptive follow-up probe based on
 what the candidate just said.
 
@@ -60,6 +65,7 @@ CORE PROBING PRINCIPLES — NEVER VIOLATE THESE
 3. RATIONALE FIELD (Procedural Justice — Explanation dimension)
    Every probe must include a rationale — a plain-English explanation of why
    this specific probe is being asked. Max 2 sentences. No jargon.
+   NEVER use terms like 'Gc', 'Gf', 'SDT', 'ZPD', or 'Back-stage' in the rationale.
    Example: 'This question helps interviewers understand how you translate
    experience into action. Specific evidence is more convincing than general claims.'
 
@@ -115,12 +121,9 @@ PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
 → Never reference psychological frameworks by name to the candidate.
 → If insufficient context exists to generate a meaningful probe,
   return probe_type: 'INSUFFICIENT_CONTEXT' and explain what is missing.`
-        }]
-      },
-      {
-        role: 'user',
-        parts: [{
-          text: `
+          },
+          {
+            text: `
       CANDIDATE CONTEXT:
       Name / ID: ${params.candidateId}
       Target Role: ${params.targetRole}
@@ -149,7 +152,8 @@ PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
       Ensure the probe heavily targets the "TARGET SIGNAL FOR THIS PROBE".
       Return JSON only — no preamble, no markdown.
           `
-        }]
+          }
+        ]
       }
     ],
     config: {
@@ -180,7 +184,7 @@ PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
     }
   });
 
-  return JSON.parse(response.text || "{}");
+  return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 };
 
 export interface AnalyzeProbeResponseParams {
@@ -195,6 +199,7 @@ export interface AnalyzeProbeResponseParams {
 }
 
 export const analyzeProbeResponse = async (params: AnalyzeProbeResponseParams): Promise<ProbeAnalysis> => {
+  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
   const aiResponse = await ai.models.generateContent({
@@ -253,7 +258,9 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
    
    Identify 1-2 dimensions with the clearest gaps.
    pj_observations: Max 2 plain English observations. Must reference specific candidate quotes. Use human terms, skip theoretical language.
-   Example: "'I tried to support the team' — try saying what you personally decided and why, rather than what you attempted." (Voice gap)
+   NEVER mention 'Procedural Justice', 'Voice gap', or 'Validation' in the observations.
+   Instead of 'Voice gap', say 'Specific Ownership'. Instead of 'Validation', say 'Context Building'.
+   Example: "'I tried to support the team' — try saying what you personally decided and why, rather than what you attempted." (No jargon)
 
 7. SCAFFOLD & NOVELTY
    scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent'
@@ -263,10 +270,14 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
    proceed: true if they should move on, false if they need more probing.
 
 9. COACHING RECOMMENDATION (Real-time Support)
-   coaching_tip: A single, actionable instruction for the candidate to improve their response right now.
+   coaching_guidance: A structured object containing:
+     - framework_gap: The specific framework signal that triggered the coaching (e.g., "Autonomy (SDT)").
+     - instruction: Detailed, actionable instruction on how to rephrase or expand.
+     - example_phrase: A "Try saying..." template tailored to the candidate's context.
+     - priority: 'high' | 'medium' | 'low'.
+   coaching_tip: A single-sentence summary of the instruction.
    Must be grounded in the STAR framework and the specific vectors identified.
-   Example: "You've explained the Situation well — focus your next answer on the specific Action you personally took to resolve it."
-   Example: "Your answer shows high Competence but low Autonomy — explain why YOU chose this approach rather than just following the process."
+   CRITICAL: ALWAYS use layman's terms. Never mention psychological theories.
    Return JSON only — no preamble, no markdown. `
         }]
       }
@@ -308,6 +319,16 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
           proceed: { type: Type.BOOLEAN },
           reason: { type: Type.STRING },
           coaching_tip: { type: Type.STRING },
+          coaching_guidance: {
+            type: Type.OBJECT,
+            properties: {
+              framework_gap: { type: Type.STRING },
+              instruction: { type: Type.STRING },
+              example_phrase: { type: Type.STRING },
+              priority: { type: Type.STRING, enum: ['high', 'medium', 'low'] }
+            },
+            required: ["framework_gap", "instruction", "example_phrase", "priority"]
+          },
           merit_vectors: {
             type: Type.OBJECT,
             properties: {
@@ -356,7 +377,7 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
     }
   });
 
-  return JSON.parse(aiResponse.text || "{}");
+  return JSON.parse(aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 };
 
 export interface GenerateQuestionSummaryParams {
@@ -366,36 +387,37 @@ export interface GenerateQuestionSummaryParams {
 }
 
 export const generateQuestionSummary = async (params: GenerateQuestionSummaryParams): Promise<QuestionSummaryReport> => {
+  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
   const { timerFramingCondition, responseDurations } = params.accumulator;
-  const avgProbeDuration = responseDurations.probes.length > 0 
-      ? responseDurations.probes.reduce((a, b) => a + b, 0) / responseDurations.probes.length 
-      : 0;
+  const avgProbeDuration = responseDurations.probes.length > 0
+    ? responseDurations.probes.reduce((a, b) => a + b, 0) / responseDurations.probes.length
+    : 0;
 
   let timerNote = "";
   if (timerFramingCondition === 'elapsed') {
-      if (responseDurations.actOne > 140) {
-          timerNote = "Note: Your Act One response was significantly long. While 'Time Elapsed' provides awareness, switching to 'Time Used' might help you budget your response more effectively.";
-      } else if (responseDurations.actOne < 60) {
-          timerNote = "Note: Your response was concise. 'Time Elapsed' kept the pressure off, but 'Response Duration' could help you aim for a more detailed sweet spot.";
-      } else {
-          timerNote = "Note: Your response length was consistent with 'Time Elapsed' framing.";
-      }
+    if (responseDurations.actOne > 140) {
+      timerNote = "Note: Your Act One response was significantly long. While 'Time Elapsed' provides awareness, switching to 'Time Used' might help you budget your response more effectively.";
+    } else if (responseDurations.actOne < 60) {
+      timerNote = "Note: Your response was concise. 'Time Elapsed' kept the pressure off, but 'Response Duration' could help you aim for a more detailed sweet spot.";
+    } else {
+      timerNote = "Note: Your response length was consistent with 'Time Elapsed' framing.";
+    }
   } else if (timerFramingCondition === 'duration') {
-      if (responseDurations.actOne >= 80 && responseDurations.actOne <= 110) {
-          timerNote = "Note: You hit the 'Response Duration' sweet spot perfectly. Great use of the target!";
-      } else if (responseDurations.actOne > 110) {
-          timerNote = "Note: You exceeded the suggested duration. 'Time Used' might help you prioritize your content better next time.";
-      } else {
-          timerNote = "Note: You finished well under the target duration. Consider if 'Time Elapsed' might help you feel less rushed.";
-      }
+    if (responseDurations.actOne >= 80 && responseDurations.actOne <= 110) {
+      timerNote = "Note: You hit the 'Response Duration' sweet spot perfectly. Great use of the target!";
+    } else if (responseDurations.actOne > 110) {
+      timerNote = "Note: You exceeded the suggested duration. 'Time Used' might help you prioritize your content better next time.";
+    } else {
+      timerNote = "Note: You finished well under the target duration. Consider if 'Time Elapsed' might help you feel less rushed.";
+    }
   } else if (timerFramingCondition === 'used') {
-      if (avgProbeDuration < responseDurations.actOne * 0.3) {
-          timerNote = "Note: You budgeted well, keeping probes concise relative to your main answer. 'Time Used' is working for you.";
-      } else {
-          timerNote = "Note: Your probe responses took up a large portion of your 'budget'. Try to front-load more evidence in Act One.";
-      }
+    if (avgProbeDuration < responseDurations.actOne * 0.3) {
+      timerNote = "Note: You budgeted well, keeping probes concise relative to your main answer. 'Time Used' is working for you.";
+    } else {
+      timerNote = "Note: Your probe responses took up a large portion of your 'budget'. Try to front-load more evidence in Act One.";
+    }
   }
 
   try {
@@ -440,7 +462,13 @@ Section 4 — Your Probe Engagement
 Paragraph on how the candidate handled probes (Scaffolded Learning/Goffman).
 CRITICAL: This section MUST start with this EXACT sentence: "${timerNote}"
 
-Section 5 — One Thing to Practise
+ Section 5 — Act-Probe Correlation
+Explain how the probe addressed a specific gap in the initial STAR response. (e.g., "The probe caught a missing 'Result' signal in your Act 1, forcing a strategic shift to evidence-based claims.")
+
+Section 6 — Integrated Excellence Guidance
+Provide a 2-sentence instruction on how to make the combined response (Act + Probe) more effective in a single delivery next time.
+
+Section 7 — One Thing to Practise
 Single prioritized instruction for next time based on the weakest overall signal.
 
 Return JSON only — no preamble, no markdown. Use the following schema.`
@@ -467,20 +495,22 @@ Return JSON only — no preamble, no markdown. Use the following schema.`
               }
             },
             probeEngagement: { type: Type.STRING },
+            probeCorrelation: { type: Type.STRING },
+            integratedCoaching: { type: Type.STRING },
             practiceTask: { type: Type.STRING }
           },
-          required: ["answerOverview", "strengths", "developmentPoints", "probeEngagement", "practiceTask"]
+          required: ["answerOverview", "strengths", "developmentPoints", "probeEngagement", "probeCorrelation", "integratedCoaching", "practiceTask"]
         }
       }
     });
 
-    const parsed = JSON.parse(aiResponse.text || "{}");
+    const parsed = JSON.parse(aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
     return {
       ...parsed,
       questionId: params.accumulator.questionId,
       questionText: params.accumulator.questionId,
       timestamp: Date.now()
-    };
+    } as QuestionSummaryReport;
   } catch (err) {
     console.error("Failed to generate question summary:", err);
     return {
@@ -494,8 +524,10 @@ Return JSON only — no preamble, no markdown. Use the following schema.`
         instruction: "Please review your session transcript."
       }],
       probeEngagement: timerNote || "N/A",
+      probeCorrelation: "Correlation analysis is pending generation.",
+      integratedCoaching: "Integrated guidance will appear here once analysis completes.",
       practiceTask: "Continue practicing your STAR technique.",
       timestamp: Date.now()
-    };
+    } as QuestionSummaryReport;
   }
 };

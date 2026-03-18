@@ -2,7 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { DetailedFeedback } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const getAI = () => {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  return new GoogleGenAI({ apiKey });
+};
 
 export interface GenerateFeedbackParams {
   transcript: string;
@@ -18,8 +21,7 @@ export interface GenerateFeedbackParams {
 export const generateDetailedFeedback = async (
   params: GenerateFeedbackParams
 ): Promise<DetailedFeedback> => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
 
@@ -542,7 +544,7 @@ text: string
       }
     });
 
-    return JSON.parse(response.text || "{}");
+    return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
   } catch (err) {
     console.error("Failed to generate detailed feedback:", err);
     // Return a structured error object that UI can handle

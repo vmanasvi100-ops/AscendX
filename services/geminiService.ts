@@ -64,7 +64,8 @@ export const analyzeResume = async (
   companyName: string,
   deepThink: boolean
 ): Promise<AuditResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const contentPart = typeof content === 'string'
     ? { text: `CV:\n${content}` }
     : { inlineData: { data: content.data, mimeType: content.mimeType } };
@@ -203,11 +204,12 @@ ANALYSIS TASKS
       }
     }
   });
-  return JSON.parse(response.text || "{}");
+  return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 };
 
 export const startGuidanceChat = (auditResult: AuditResult, role: string): Chat => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
@@ -223,7 +225,8 @@ export const startGuidanceChat = (auditResult: AuditResult, role: string): Chat 
 };
 
 export const searchStealthVentures = async (role: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Venture Anchor: High-growth startups, stealth ventures, and Series A/B firms globally hiring for this specific role.";
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -231,13 +234,14 @@ export const searchStealthVentures = async (role: string) => {
     config: { tools: [{ googleSearch: {} }] }
   });
   return {
-    text: response.text || '',
+    text: response.candidates?.[0]?.content?.parts?.[0]?.text || '',
     sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ title: c.web?.title, uri: c.web?.uri })) || []
   };
 };
 
 export const searchUnderratedGems = async (role: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Hidden Gem Anchor: Specialized industry leaders, mid-market powerhouses, and underrated firms with high-caliber talent bars.";
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -245,13 +249,14 @@ export const searchUnderratedGems = async (role: string) => {
     config: { tools: [{ googleSearch: {} }] }
   });
   return {
-    text: response.text || '',
+    text: response.candidates?.[0]?.content?.parts?.[0]?.text || '',
     sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ title: c.web?.title, uri: c.web?.uri })) || []
   };
 };
 
 export const searchGlobalJobs = async (role: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Enterprise Anchor: Major global corporations and market-dominant firms with robust career ecosystems.";
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -259,13 +264,14 @@ export const searchGlobalJobs = async (role: string) => {
     config: { tools: [{ googleSearch: {} }] }
   });
   return {
-    text: response.text || '',
+    text: response.candidates?.[0]?.content?.parts?.[0]?.text || '',
     sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ title: c.web?.title, uri: c.web?.uri })) || []
   };
 };
 
 export const searchHCIOpportunities = async (role: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Specialist Anchor: Research labs, innovation studios, and deep-tech boutiques relevant to the domain.";
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -273,13 +279,14 @@ export const searchHCIOpportunities = async (role: string) => {
     config: { tools: [{ googleSearch: {} }] }
   });
   return {
-    text: response.text || '',
+    text: response.candidates?.[0]?.content?.parts?.[0]?.text || '',
     sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({ title: c.web?.title, uri: c.web?.uri })) || []
   };
 };
 
 export const extractJobListings = async (text: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `AUDIT PROTOCOL: Extract verified company career hubs from the search text.
@@ -306,5 +313,5 @@ export const extractJobListings = async (text: string) => {
       }
     }
   });
-  try { return JSON.parse(response.text || "[]"); } catch (e) { return []; }
+  try { return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "[]"); } catch (e) { return []; }
 };

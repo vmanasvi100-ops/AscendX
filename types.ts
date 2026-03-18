@@ -156,15 +156,12 @@ export interface Settings {
   visualFeedback: VisualFeedbackStyle;
   audioCues: boolean;
   gamification: boolean;
-  coachMarkTheme: CoachMarkTheme;
   readAloud: boolean;
   speechRate: SpeechRate;
   videoEnabled: boolean;
   participantId: string;
   condition: ExperimentCondition;
   cvText?: string;
-  timerFramingCondition: TimerFramingCondition;
-  isNervous: boolean;
 }
 
 // Fix: Added TourResettableSettings interface
@@ -175,7 +172,6 @@ export interface TourResettableSettings {
   visualFeedback: VisualFeedbackStyle;
   audioCues: boolean;
   gamification: boolean;
-  coachMarkTheme: CoachMarkTheme;
   videoEnabled: boolean;
 }
 
@@ -188,7 +184,7 @@ export interface TourStep {
   placement: 'top' | 'bottom' | 'left' | 'right';
   component: 'welcome' | 'interview' | 'report';
   section: string;
-  action?: 'START_INTERVIEW';
+  action?: 'START_INTERVIEW' | 'FINISH_SESSION';
 }
 
 // ─── AscendX Layer B Types — v5.0 ──────────────────────────────────
@@ -423,17 +419,27 @@ export interface Probe {
   zpd_note: string;
 }
 
+
+export interface StarStatus {
+  situation: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+  task: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+  action: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+  result: 'complete' | 'partial' | 'missing' | 'not_yet_required';
+}
+
+export interface CoachingGuidance {
+  framework_gap: string;
+  instruction: string;
+  example_phrase: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
 export interface ProbeAnalysis {
   probe_successful: boolean;
   depth_delta: 'increased' | 'same' | 'decreased';
   evidence_added: string;
-  star_status: {
-    situation: 'complete' | 'partial' | 'missing' | 'not_yet_required';
-    task: 'complete' | 'partial' | 'missing' | 'not_yet_required';
-    action: 'complete' | 'partial' | 'missing' | 'not_yet_required';
-    result: 'complete' | 'partial' | 'missing' | 'not_yet_required';
-  };
-  weakest_star_component: 'situation' | 'task' | 'action' | 'result' | null;
+  star_status: StarStatus;
+  weakest_star_component: keyof StarStatus | null;
   contextual_anchor: string;
   suggested_next_probe_type: 'CLARIFYING' | 'CONCRETE' | 'DEEPENING' | 'STRATEGIC' | null;
   sdt_signals: {
@@ -449,6 +455,7 @@ export interface ProbeAnalysis {
   reason: string;
   verbatimProbe?: string;
   coaching_tip?: string;
+  coaching_guidance?: CoachingGuidance;
 
   // Continuous Analysis Signals (Returned every time)
   merit_vectors: {
@@ -485,7 +492,9 @@ export interface QuestionSummaryReport {
     instruction: string;
   }[];
   probeEngagement: string; // Section 4
-  practiceTask: string;   // Section 5
+  probeCorrelation: string; // Section 5: How probe connects back to Act 1
+  integratedCoaching: string; // Section 6: Guidance for effective expansion
+  practiceTask: string;   // Section 7: One Thing to Practice
   timestamp: number;
   allProbeAnalyses?: ProbeAnalysis[];
 }

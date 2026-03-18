@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Target, ShieldCheck, Sparkles, Brain, Activity, MessageSquare, ShieldAlert, ArrowRight, Download, Printer, X } from 'lucide-react';
+import { Target, ShieldCheck, Sparkles, Brain, Activity, MessageSquare, ShieldAlert, ArrowRight, Download, Printer, X, Award } from 'lucide-react';
 import { Probe, ProbeAnalysis } from '../types';
 
 interface ProbingReportProps {
@@ -16,7 +16,7 @@ const ProbingReport: React.FC<ProbingReportProps> = ({ probe, analysis, onClose,
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
@@ -35,14 +35,14 @@ const ProbingReport: React.FC<ProbingReportProps> = ({ probe, analysis, onClose,
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button 
+            <button
               onClick={handlePrint}
               className="p-2 hover:bg-slate-100 rounded-xl text-slate-600 transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
             >
               <Printer size={18} />
               Print
             </button>
-            <button 
+            <button
               onClick={() => {
                 const content = `
 # PROBING INSIGHT REPORT
@@ -57,6 +57,26 @@ Rationale: ${probe.rationale}
 Success: ${analysis.probe_successful ? 'YES' : 'NO'}
 Evidence Delta: ${analysis.evidence_added}
 Depth Delta: ${analysis.depth_delta}
+
+## COACHING GUIDANCE
+Signal: ${analysis.coaching_guidance?.framework_gap || 'N/A'}
+Instruction: ${analysis.coaching_guidance?.instruction || 'N/A'}
+Try saying: "${analysis.coaching_guidance?.example_phrase || 'N/A'}"
+
+## FRAMEWORK SIGNALS
+### SDT MERIT VECTORS
+- Autonomy: ${analysis.merit_vectors.autonomy}/100
+- Competence: ${analysis.merit_vectors.competence}/100
+- Relatedness: ${analysis.merit_vectors.relatedness}/100
+
+### CHC COGNITIVE SIGNALS
+- Crystallised (Gc): ${analysis.chc_signals.gc}
+- Fluid (Gf): ${analysis.chc_signals.gf}
+- Quantitative (Gq): ${analysis.chc_signals.gq}
+
+### GOFFMAN PRESENTATION
+- Front Stage: ${analysis.goffman_scores.front_stage}
+- Back Stage: ${analysis.goffman_scores.back_stage}
 
 ## STAR PROGRESSION
 ${Object.entries(analysis.star_status).map(([k, v]) => `- ${k.toUpperCase()}: ${(v as string).replace('_', ' ')}`).join('\n')}
@@ -84,7 +104,7 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
               <Download size={16} />
               Download Analysis
             </button>
-            <button 
+            <button
               onClick={onClose}
               className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition-all"
             >
@@ -147,10 +167,9 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-900">Evidence Delta</h3>
                 </div>
                 <div className="flex items-center gap-2 mb-2">
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
-                    analysis.depth_delta === 'increased' ? 'bg-emerald-100 text-emerald-700' :
-                    analysis.depth_delta === 'decreased' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-700'
-                  }`}>
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${analysis.depth_delta === 'increased' ? 'bg-emerald-100 text-emerald-700' :
+                      analysis.depth_delta === 'decreased' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-700'
+                    }`}>
                     Depth: {analysis.depth_delta}
                   </span>
                 </div>
@@ -167,19 +186,17 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {Object.entries(analysis.star_status).map(([component, status]) => (
-                <div key={component} className={`p-5 rounded-[32px] border-2 flex flex-col items-center gap-4 transition-all ${
-                  status === 'complete' ? 'bg-emerald-50 border-emerald-500 text-emerald-700' :
-                  status === 'partial' ? 'bg-amber-50 border-amber-400 text-amber-700' :
-                  'bg-slate-50 border-slate-200 text-slate-300 opacity-60'
-                }`}>
-                  <div className={`p-4 rounded-2xl ${
-                    status === 'complete' ? 'bg-emerald-100' :
-                    status === 'partial' ? 'bg-amber-100' :
-                    'bg-slate-100'
+                <div key={component} className={`p-5 rounded-[32px] border-2 flex flex-col items-center gap-4 transition-all ${status === 'complete' ? 'bg-emerald-50 border-emerald-500 text-emerald-700' :
+                    status === 'partial' ? 'bg-amber-50 border-amber-400 text-amber-700' :
+                      'bg-slate-50 border-slate-200 text-slate-300 opacity-60'
                   }`}>
+                  <div className={`p-4 rounded-2xl ${status === 'complete' ? 'bg-emerald-100' :
+                      status === 'partial' ? 'bg-amber-100' :
+                        'bg-slate-100'
+                    }`}>
                     {status === 'complete' ? <ShieldCheck size={28} /> :
-                     status === 'partial' ? <Activity size={28} /> : 
-                     <Brain size={28} />}
+                      status === 'partial' ? <Activity size={28} /> :
+                        <Brain size={28} />}
                   </div>
                   <div className="text-center">
                     <p className="text-[10px] font-black uppercase tracking-widest opacity-60">{component}</p>
@@ -207,16 +224,16 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
           <section className="space-y-6">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center gap-2">
               <Sparkles size={16} className="text-indigo-600" />
-              2. Scaffold Assessment (Scientific Signal)
+              2. Growth & Adaptability (Support Signal)
             </h3>
             <div className="p-8 bg-slate-900 text-white rounded-[40px] shadow-xl relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-12 opacity-10">
+              <div className="absolute top-0 right-0 p-12 opacity-10">
                 <Brain size={140} />
               </div>
               <div className="relative z-10 space-y-4">
                 <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-600 rounded-full">
-                   <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                   <span className="text-[10px] font-black uppercase tracking-[0.2em]">Signal: {(analysis.scaffold_dependency_signal as string).replace('_', ' ')}</span>
+                  <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em]">Signal: {(analysis.scaffold_dependency_signal as string).replace('_', ' ')}</span>
                 </div>
                 <p className="text-2xl font-black leading-tight tracking-tight">
                   {analysis.interpretation}
@@ -237,7 +254,7 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             <section className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
                 <MessageSquare size={16} />
-                3. Communicative Precision (Procedural Justice)
+                3. Clarity & Reliability (Response Audit)
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {analysis.pj_observations.map((obs, idx) => (
@@ -249,10 +266,137 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
                   </div>
                 ))}
               </div>
-              <div className="pt-4 text-center">
-                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 px-8 py-2 border border-slate-100 rounded-full inline-block">
-                   Analytical framework: PJ Qualitative Audit
-                 </p>
+            </section>
+          )}
+
+          {/* Section 5: Professional Depth & Skill Audit */}
+          <section className="space-y-12">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center gap-2">
+              <Activity size={16} className="text-indigo-600" />
+              4. Professional Depth & Skill Audit
+            </h3>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* SDT Merit Vectors */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ownership & Impact Signals</h4>
+                <div className="space-y-6">
+                  {Object.entries(analysis.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => (
+                    <div key={vector} className="space-y-2">
+                      <div className="flex justify-between items-end">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
+                            {vector === 'autonomy' ? 'Ownership & Agency' :
+                              vector === 'competence' ? 'Skill Mastery' :
+                                'Team Impact'}
+                          </span>
+                          <span className="text-[9px] font-bold text-slate-400 italic">
+                            {vector === 'autonomy' ? 'Recruiters value personal drive and ownership.' :
+                              vector === 'competence' ? 'Recruiters look for specific execution ability.' :
+                                'Recruiters value collaborative business impact.'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-black text-indigo-600">{score as number}/100</span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${score}%` }}
+                          className={`h-full ${analysis.merit_vectors.lowest_vector === vector ? 'bg-amber-500' : 'bg-indigo-600'}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* CHC Cognitive Signals */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Thinking Styles & Precision</h4>
+                <div className="space-y-4">
+                  {Object.entries(analysis.chc_signals).filter(([k]) => k !== 'lowest_signal').map(([signal, level]) => (
+                    <div key={signal} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          {signal === 'gc' ? 'Professional Expertise' :
+                            signal === 'gf' ? 'Strategic Thinking' :
+                              'Evaluation & Precision'}
+                        </span>
+                        <p className="text-[10px] font-bold text-slate-800">
+                          {signal === 'gc' ? 'How clearly you use industry-specific details.' :
+                            signal === 'gf' ? 'Your logic flow in complex or new situations.' :
+                              'Your use of data and metrics for evidence.'}
+                        </p>
+                        <p className="text-[9px] text-indigo-500 font-black uppercase tracking-tighter mt-1">
+                          {signal === 'gc' ? 'Recruiters value: Specific industry anchors' :
+                            signal === 'gf' ? 'Recruiters value: Strong logic transitions' :
+                              'Recruiters value: Quantifiable proof'}
+                        </p>
+                      </div>
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' :
+                          level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{level as string}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Goffman Scores */}
+            <div className="p-8 bg-slate-50 rounded-[40px] border-2 border-slate-200">
+              <div className="flex items-center gap-3 mb-6">
+                <Target className="text-indigo-600" />
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900">Authenticity Check: Professional vs. Real</h4>
+              </div>
+              <p className="text-[10px] font-bold text-slate-500 mb-6 italic leading-relaxed">
+                Recruiters look for a balance. They want a "Front Stage" professional persona that is backed up by "Back Stage" genuine experience. If these don't align, you may seem over-prepared or insincere.
+              </p>
+              <div className="relative h-12 bg-white rounded-2xl border border-slate-200 overflow-hidden flex items-center px-4">
+                <div className="absolute inset-0 flex">
+                  <div className="h-full bg-indigo-50/50 flex-1 border-r border-slate-100 flex items-center justify-center">
+                    <span className="text-[9px] font-black uppercase text-indigo-400">Front Stage</span>
+                  </div>
+                  <div className="h-full bg-emerald-50/30 flex-1 flex items-center justify-center">
+                    <span className="text-[9px] font-black uppercase text-emerald-400">Back Stage</span>
+                  </div>
+                </div>
+                <motion.div
+                  initial={{ left: "50%" }}
+                  animate={{ left: `${(analysis.goffman_scores.back_stage / (analysis.goffman_scores.front_stage + analysis.goffman_scores.back_stage)) * 100}%` }}
+                  className="absolute w-8 h-8 -ml-4 bg-indigo-600 rounded-lg shadow-xl border-2 border-white flex items-center justify-center z-10"
+                >
+                  <Activity size={16} className="text-white" />
+                </motion.div>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 6: Coherence Coach Guidance */}
+          {analysis.coaching_guidance && (
+            <section className="space-y-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
+                <Award size={16} />
+                5. Coherence Coach Guidance
+              </h3>
+              <div className="p-10 bg-indigo-600 text-white rounded-[48px] shadow-2xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-12 opacity-10 group-hover:rotate-12 transition-transform">
+                  <Target size={200} />
+                </div>
+                <div className="relative z-10">
+                  <div className="inline-flex items-center gap-3 px-4 py-2 bg-white/10 rounded-full mb-6 border border-white/20">
+                    <Sparkles size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">{analysis.coaching_guidance.framework_gap} Target</span>
+                  </div>
+                  <h4 className="text-2xl font-black leading-tight mb-8">
+                    {analysis.coaching_guidance.instruction}
+                  </h4>
+                  <div className="p-8 bg-black/20 backdrop-blur-md rounded-[32px] border border-white/10">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-4">Strategic Rephrasing Template:</p>
+                    <p className="text-lg font-medium italic leading-relaxed">
+                      "{analysis.coaching_guidance.example_phrase}"
+                    </p>
+                  </div>
+                </div>
               </div>
             </section>
           )}
@@ -260,13 +404,13 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
           {/* Footer Card */}
           <div className="p-10 bg-indigo-600 text-white rounded-[40px] shadow-2xl relative overflow-hidden">
             <div className="absolute bottom-0 right-0 p-8 opacity-20">
-               <Target size={120} />
+              <Target size={120} />
             </div>
             <div className="relative z-10 flex flex-col md:flex-row items-center gap-8 justify-between">
               <div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80 mb-3 text-white">System Integrity Check</h3>
                 <p className="text-xl font-bold leading-tight">
-                  Real-time Merit alignment check complete. 
+                  Real-time Merit alignment check complete.
                   <br />
                   Analysis archived in {participantId || "local"} repository.
                 </p>

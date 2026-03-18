@@ -210,12 +210,22 @@ export const tourSteps: TourStep[] = [
     },
     {
         id: 'break-1-reflect',
-        targetId: 'reflective-break-content',
+        targetId: 'btn-reflect',
         title: 'Reflective Break',
-        content: "Between questions, we enforce an intentional 2-minute pause. This 'Cognitive Cooling' period is crucial for mental reset and structural planning of your next answer.",
-        placement: 'top',
+        content: "Click this button to start an intentional 2-minute pause between questions. This 'Cognitive Cooling' period is crucial for mental reset and planning your next STAR answer.",
+        placement: 'bottom',
         component: 'interview',
         section: 'break',
+    },
+    {
+        id: 'interview-8-finish',
+        targetId: 'ascend-next-step-button',
+        title: 'Complete Your Session',
+        content: "When you have finished answering all questions, click 'Finish Session' to generate your final high-fidelity audit report.",
+        placement: 'top',
+        component: 'interview',
+        section: 'finish',
+        action: 'FINISH_SESSION',
     },
     // --- REPORT PHASE ---
     {

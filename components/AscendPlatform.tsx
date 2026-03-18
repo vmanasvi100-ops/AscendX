@@ -1,14 +1,29 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
-import { RecordingStatus, AnalyticsEventType, TimerDisplay, TimerFramingCondition, Question, Probe, ProbeAnalysis, DetailedFeedback, QuestionSummaryReport, QuestionDataAccumulator } from '../types';
+import { RecordingStatus, AnalyticsEventType, TimerDisplay, Question, Probe, ProbeAnalysis, DetailedFeedback, QuestionSummaryReport, TimerFramingCondition } from '../types';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { generateProbe, analyzeProbeResponse, generateQuestionSummary } from '../services/probingService';
 import { generateDetailedFeedback } from '../services/feedbackService';
 import ProbingPipeline from './ProbingPipeline';
-import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, AlertCircle, Sparkles } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import ProbingReport from './ProbingReport';
+import { AnimatePresence } from 'motion/react';
+import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, Sparkles, Scale, Layers, ShieldCheck, Target } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
+import { tourSteps } from '../data';
 
-type ToolkitTab = 'STAR' | 'notes' | 'transcript' | 'analysis' | 'summaries';
+type ToolkitTab = 'plan' | 'notes' | 'transcript' | 'insights' | 'report';
+
+interface SessionEntry {
+    questionIndex: number;
+    questionText: string;
+    starPhaseReached: number;
+    transcriptSlice: string;
+    probe: Probe | null;
+    probeAnalysis: ProbeAnalysis | null;
+    summaryReport: QuestionSummaryReport | null;
+}
 type VideoState = 'standard' | 'hidden';
 type AspectRatio = '9/16' | '2/3' | '3/4' | '4/5' | '3/2' | '16/10' | '16/5' | '16/7' | '20/7';
 
@@ -38,11 +53,10 @@ const Waveform: React.FC<{ active: boolean; scale?: number }> = ({ active, scale
 
 const TimerWidget: React.FC<{
     mode: TimerDisplay;
-    framing: TimerFramingCondition;
     elapsedSeconds: number;
     isRecording: boolean;
     isHidden: boolean;
-}> = ({ mode, framing, elapsedSeconds, isRecording, isHidden }) => {
+}> = ({ mode, elapsedSeconds, isRecording, isHidden }) => {
     if (isHidden) return null;
 
     const format = (s: number) => {
@@ -55,14 +69,7 @@ const TimerWidget: React.FC<{
         <div className={`flex items-center gap-3 px-4 py-2 rounded-2xl backdrop-blur-md border transition-all duration-500 shadow-xl ${isRecording ? 'bg-white/90 border-indigo-200' : 'bg-white/70 border-slate-200'
             }`}>
             <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-rose-500 animate-pulse' : 'bg-slate-300'}`} />
-            <div className="flex flex-col">
-                <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">
-                    {framing === 'elapsed' ? 'Time Elapsed' : framing === 'duration' ? 'Response Duration' : 'Time Used'}
-                </span>
-                <span className="text-base font-black font-mono tabular-nums leading-none text-slate-900">
-                    {framing === 'used' ? format(Math.max(0, 90 - elapsedSeconds)) : format(elapsedSeconds)}
-                </span>
-            </div>
+            <span className="text-base font-black font-mono tabular-nums leading-none text-slate-900">{format(elapsedSeconds)}</span>
         </div>
     );
 };
@@ -73,9 +80,21 @@ interface AscendPlatformProps {
 }
 
 const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => {
-    const {
-        videoEnabled, setVideoEnabled, dyslexiaFont, timerDisplay, liveTools, activeQuestions, cvText, participantId, condition,
-        timerFramingCondition, setTimerFramingCondition, isTourActive, tourStep
+    const { 
+        videoEnabled, 
+        setVideoEnabled, 
+        dyslexiaFont, 
+        timerDisplay, 
+        liveTools, 
+        activeQuestions, 
+        cvText, 
+        companyName, 
+        targetRole, 
+        jobDescription, 
+        timerFramingCondition, 
+        participantId,
+        isTourActive,
+        tourStep 
     } = useSettings();
     const [starPhase, setStarPhase] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -83,7 +102,6 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
 
     const [transcript, setTranscript] = useState<string>("");
     const lastPhaseTranscriptLength = useRef<number>(0);
-    const questionStartTranscriptLength = useRef<number>(0);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -94,6 +112,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [isTimerHidden, setIsTimerHidden] = useState(false);
 
     const phaseStartTimestamp = useRef<number>(Date.now());
+    const reportRef = useRef<HTMLDivElement>(null);
     const [isBreakActive, setIsBreakActive] = useState(false);
     const [breakTimeRemaining, setBreakTimeRemaining] = useState(120);
     const [isWarmupActive, setIsWarmupActive] = useState(false);
@@ -101,35 +120,26 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [sessionSeconds, setSessionSeconds] = useState(0);
     const [userNotes, setUserNotes] = useState(() => localStorage.getItem('ascend_notes') || "");
 
-
     // Probing Pipeline State
     const [currentProbe, setCurrentProbe] = useState<Probe | null>(null);
     const [probeAnalysis, setProbeAnalysis] = useState<ProbeAnalysis | null>(null);
     const [isGeneratingProbe, setIsGeneratingProbe] = useState(false);
-    const [probeLoadingType, setProbeLoadingType] = useState<'question' | 'analysis'>('question');
     const [isProbingActive, setIsProbingActive] = useState(false);
     const [probingTranscript, setProbingTranscript] = useState("");
-    const [probeCount, setProbeCount] = useState(0);
-    const askedProbesThisQuestion = useRef<string[]>([]);
-    const [probeCompletionMessage, setProbeCompletionMessage] = useState<string | null>(null);
-    const [nextQuestionCountdown, setNextQuestionCountdown] = useState(0);
-    const [probeRevealCountdown, setProbeRevealCountdown] = useState(0);
-    const [answerProbeCountdown, setAnswerProbeCountdown] = useState(0);
-    const isCountingDownToAnswer = useRef(false);
+    const [probeCountdown, setProbeCountdown] = useState(0);
+    const [decisionCountdown, setDecisionCountdown] = useState(0);
+    const [micCountdown, setMicCountdown] = useState(0);
+    const [isMicOpening, setIsMicOpening] = useState(false);
+    const [reassuringMessage, setReassuringMessage] = useState("");
 
-    // Per-Question Response Summary State
-    const currentPhaseAnalyses = useRef<ProbeAnalysis[]>([]);
-    const currentProbeAnalyses = useRef<ProbeAnalysis[]>([]);
-    const [questionSummaries, setQuestionSummaries] = useState<QuestionSummaryReport[]>([]);
-    const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
-
-    const actOneDuration = useRef<number>(0);
-    const probeDurations = useRef<number[]>([]);
+    // Session Log Accumulator
+    const [sessionLog, setSessionLog] = useState<SessionEntry[]>([]);
+    const [reportModalEntry, setReportModalEntry] = useState<SessionEntry | null>(null);
 
     // Detailed Feedback State
     const [detailedFeedback, setDetailedFeedback] = useState<DetailedFeedback | null>(null);
     const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
-    const [activeTab, setActiveTab] = useState<ToolkitTab>('STAR')
+    const [activeTab, setActiveTab] = useState<ToolkitTab>('plan');
 
     const STAR_LABELS = ['Situation', 'Task', 'Action', 'Result'];
     const CATEGORIES = [
@@ -159,6 +169,35 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
 
     useEffect(() => {
         let timer: number | undefined;
+        if (probeCountdown > 0) {
+            timer = window.setInterval(() => setProbeCountdown(prev => prev - 1), 1000);
+        }
+        return () => clearInterval(timer);
+    }, [probeCountdown]);
+
+    useEffect(() => {
+        let timer: number | undefined;
+        if (decisionCountdown > 0) {
+            timer = window.setInterval(() => setDecisionCountdown(prev => prev - 1), 1000);
+        }
+        return () => clearInterval(timer);
+    }, [decisionCountdown]);
+
+    useEffect(() => {
+        let timer: number | undefined;
+        if (micCountdown > 0) {
+            timer = window.setInterval(() => setMicCountdown(prev => prev - 1), 1000);
+        } else if (micCountdown === 0 && isMicOpening && recordingStatus === 'idle' && stream) {
+            // Auto-trigger recording after micCountdown hits 0 if we were in the opening flow
+            setIsMicOpening(false);
+            setRecordingStatus('recording');
+            startTranscription(stream);
+        }
+        return () => clearInterval(timer);
+    }, [micCountdown, isMicOpening, stream]);
+
+    useEffect(() => {
+        let timer: number | undefined;
         if (isBreakActive && !isWarmupActive && breakTimeRemaining > 0) {
             timer = window.setInterval(() => setBreakTimeRemaining(prev => prev - 1), 1000);
         } else if (isBreakActive && !isWarmupActive && breakTimeRemaining === 0) {
@@ -172,177 +211,59 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         }
         return () => clearInterval(timer);
     }, [isBreakActive, isWarmupActive, breakTimeRemaining, warmupTimeRemaining]);
-
+    
+    const { finishSessionTrigger, setFinishSessionTrigger } = useSettings();
     useEffect(() => {
-        let timer: number | undefined;
-        if (answerProbeCountdown > 0) {
-            timer = window.setInterval(() => {
-                setAnswerProbeCountdown(prev => {
-                    if (prev === 1 && isCountingDownToAnswer.current) {
-                        isCountingDownToAnswer.current = false;
-                        handleRecord();
-                        return 0;
+        if (finishSessionTrigger) {
+            setFinishSessionTrigger(false);
+            const forceFinish = async () => {
+                try {
+                    if (recordingStatus === 'recording') {
+                        await handleRecord();
                     }
-                    return prev - 1;
-                });
-            }, 1000);
+                    // Buffering to ensure transcript state is fully settled from the stream
+                    await new Promise(r => setTimeout(r, 800));
+                    setIsGeneratingFeedback(true);
+                    setRecordingStatus('uploaded');
+                    await handleGenerateFinalFeedback();
+                } catch (err) {
+                    console.error("Automated finish failed:", err);
+                    setRecordingStatus('uploaded');
+                }
+            };
+            forceFinish();
         }
-        return () => {
-            if (timer) clearInterval(timer);
-        };
-    }, [answerProbeCountdown]);
+    }, [finishSessionTrigger, recordingStatus]); // Keep recordingStatus to handle the handleRecord state correctly
+
+    // Tour Reactive Navigation
     useEffect(() => {
-        let timer: number | undefined;
-        if (nextQuestionCountdown > 0) {
-            timer = window.setInterval(() => setNextQuestionCountdown(prev => prev - 1), 1000);
-        } else if (nextQuestionCountdown === 0 && isProbingActive && !isGeneratingProbe) {
-            // No auto-trigger here, just keep button unlocked
-        }
-        return () => clearInterval(timer);
-    }, [nextQuestionCountdown, isProbingActive, isGeneratingProbe]);
+        if (!isTourActive) return;
+        
+        const currentStep = tourSteps[tourStep];
+        if (!currentStep) return;
 
-    // --- Tour Runtime Orchestrator --- 
-    useEffect(() => {
-        if (!isTourActive) {
-            // Cleanup: If the tour was active and we had set "Demo" state, clear it
-            if (detailedFeedback?.noData || currentProbe || questionSummaries.length > 0) {
-                setDetailedFeedback(null);
-                setIsBreakActive(false);
-                setCurrentProbe(null);
-                setProbeAnalysis(null);
-                setQuestionSummaries([]);
-                setActiveTab('STAR'); // Reset to Plan view
-            }
-            return;
+        // Auto-switch tabs based on targetId
+        if (currentStep.targetId?.startsWith('tab-')) {
+            const tabName = currentStep.targetId.replace('tab-', '') as ToolkitTab;
+            setActiveTab(tabName);
+        } else if (
+            currentStep.targetId === 'ascend-toolkit-sidebar' ||
+            currentStep.targetId === 'ascend-toolkit-star' ||
+            currentStep.targetId === 'ascend-toolkit-section'
+        ) {
+            setActiveTab('plan');
+        } else if (
+            currentStep.targetId === 'ascend-probing-pipeline' ||
+            currentStep.targetId?.includes('insights')
+        ) {
+            setActiveTab('insights');
+        } else if (
+            currentStep.targetId === 'ascend-toolkit-reports' ||
+            currentStep.targetId?.includes('report')
+        ) {
+            setActiveTab('report');
         }
-
-        // --- PHASE SYNCHRONIZATION ---
-
-        // 1. Toolkit Tab Management (Step 16: Analysis, Step 18: Reports)
-        if (tourStep === 16) {
-            setActiveTab('analysis');
-            if (!currentProbe) {
-                setCurrentProbe({
-                    probe: "How did you specifically measure the 'improved efficiency' you mentioned?",
-                    probe_type: 'CONCRETE',
-                    rationale: "Quantifying 'efficiency' increases the actionable merit of the response.",
-                    contextual_anchor: "improved efficiency",
-                    scaffold_phase: 2,
-                    difficulty: 'MEDIUM',
-                    question_type: 'CORE_COMPETENCY',
-                    zpd_note: "Ready for metrics."
-                });
-                setProbeAnalysis({
-                    probe_successful: true,
-                    depth_delta: 'increased',
-                    evidence_added: "Quantitative metrics (20% reduction)",
-                    star_status: { situation: 'complete', task: 'complete', action: 'complete', result: 'complete' },
-                    weakest_star_component: null,
-                    contextual_anchor: "measurement",
-                    suggested_next_probe_type: 'DEEPENING',
-                    sdt_signals: { autonomy_language: 'present', competence_language: 'present', relatedness_language: 'absent' },
-                    scaffold_dependency_signal: 'used_moderately',
-                    interpretation: "Candidate successfully anchored the claim.",
-                    pj_observations: ["Clear voice"],
-                    novel_claim_introduced: false,
-                    proceed: true,
-                    reason: "Sufficient depth.",
-                    merit_vectors: { autonomy: 80, competence: 85, relatedness: 40, lowest_vector: 'relatedness' },
-                    goffman_scores: { front_stage: 90, back_stage: 10 },
-                    chc_signals: { gc: 'strong', gf: 'strong', gq: 'moderate', lowest_signal: 'gq' },
-                    algorithmic_aversion: { detected: false, evidence: null }
-                } as any);
-            }
-        } else if (tourStep === 18) {
-            setActiveTab('summaries');
-            if (questionSummaries.length === 0) {
-                setQuestionSummaries([{
-                    questionId: 'demo',
-                    questionText: "Tell me about a time you handled a challenging project.",
-                    answerOverview: "A well-structured narrative focusing on technical latency reduction.",
-                    strengths: ["Clear STAR structure", "Strong technical vocabulary"],
-                    developmentPoints: [
-                        { gap: "Contextual Framing", whyItMatters: "Stakeholders need the 'Why'.", instruction: "Explain the business impact." }
-                    ],
-                    probeEngagement: "Excellent response to the 'Concrete' probe.",
-                    practiceTask: "Focus on business value metrics next time.",
-                    timestamp: Date.now(),
-                    allProbeAnalyses: []
-                }]);
-            }
-        } else if (tourStep < 16) {
-            // For earlier steps, default back to STAR if we were in analysis/summaries
-            if (activeTab === 'analysis' || activeTab === 'summaries') setActiveTab('STAR');
-            if (currentProbe && !isProbingActive) {
-                setCurrentProbe(null);
-                setProbeAnalysis(null);
-            }
-            if (questionSummaries.length > 0 && !isGeneratingSummary) {
-                setQuestionSummaries([]);
-            }
-        }
-
-        // 2. Reflective Break Phase (Step 19)
-        if (tourStep === 19) {
-            setIsBreakActive(true);
-        } else if (tourStep < 19) {
-            setIsBreakActive(false);
-        }
-
-        // 3. Final Report Phase (Steps 20-24)
-        if (tourStep >= 20) {
-            setIsBreakActive(false); // Ensure break overlay is down
-            if (recordingStatus !== 'uploaded') setRecordingStatus('uploaded');
-            if (!detailedFeedback) {
-                setDetailedFeedback({
-                    noData: true, // Marker for cleanup
-                    performanceSummary: "This is a demo performance audit summary for the system tour guide. It highlights key communication patterns.",
-                    overallStarSynthesis: "Strong evidence found across all STAR dimensions.",
-                    strengths: ["Clear logical structure", "Action-oriented language"],
-                    weaknesses: ["Could deepen the 'Result' impact quantification"],
-                    actionableSuggestions: ["Focus on metrics", "Try the Deepening probe"],
-                    starAnalysis: { situation: "Complete", task: "Complete", action: "Complete", result: "Partial" },
-                    keywordCoverage: { found: ["Leadership", "Impact"], missing: ["Strategy"] },
-                    careerDevelopment: { certifications: ["Certified Interviewer"], nextSteps: ["Advanced Practice"] },
-                    chcCognitiveDimensions: {
-                        crystallisedIntelligence: { score: 88, evidenceBasis: "Strong technical vocabulary" },
-                        fluidIntelligence: { score: 92, evidenceBasis: "Excellent logical mapping" },
-                        practicalReasoning: { score: 85, evidenceBasis: "Result-oriented decision making" },
-                        overallCHCNote: "Candidate shows high analytical merit."
-                    },
-                    rubrics: {
-                        starCompletion: 85, evidenceSpecificity: 90, roleClarity: 80, jdAlignment: 75, communicationClarity: 95,
-                        justifications: {
-                            starCompletion: "Good STAR coverage.", evidenceSpecificity: "Very specific examples.",
-                            roleClarity: "Clear role definition.", jdAlignment: "Solid alignment.", communicationClarity: "Excellent clarity."
-                        }
-                    },
-                    maskedTranscript: { text: "Demo transcript text for tour purposes..." }
-                } as any);
-            }
-        } else if (detailedFeedback?.noData) {
-            // If moving back from report steps, clear demo data and restore interview state
-            setDetailedFeedback(null);
-            if (recordingStatus === 'uploaded') setRecordingStatus('idle');
-        }
-    }, [isTourActive, tourStep, detailedFeedback, recordingStatus, activeTab, currentProbe, questionSummaries]);
-
-    useEffect(() => {
-        let timer: number | undefined;
-        if (probeRevealCountdown > 0) {
-            timer = window.setInterval(() => {
-                setProbeRevealCountdown(prev => {
-                    if (prev === 1) {
-                        setProbeAnalysis(null);
-                        setActiveTab('STAR')
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
-        }
-        return () => clearInterval(timer);
-    }, [probeRevealCountdown]);
+    }, [isTourActive, tourStep]);
 
     const handleStartBreak = async () => {
         if (recordingStatus === 'recording') await handleRecord();
@@ -403,100 +324,17 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         }
     };
 
-    const handleGenerateFinalFeedback = async () => {
-        if (transcript.trim().length < 30) {
-            setDetailedFeedback({
-                noData: true,
-                performanceSummary: "No response recorded. To check the clarity of your answer, please turn on your microphone and speak your response using the STAR format.",
-                overallStarSynthesis: "N/A - Zero verbal signal detected for aggregate analysis.",
-                rubrics: {
-                    starCompletion: 0,
-                    evidenceSpecificity: 0,
-                    roleClarity: 0,
-                    jdAlignment: 0,
-                    communicationClarity: 0,
-                    justifications: {
-                        starCompletion: "N/A",
-                        evidenceSpecificity: "N/A",
-                        roleClarity: "N/A",
-                        jdAlignment: "N/A",
-                        communicationClarity: "N/A"
-                    }
-                },
-                strengths: [],
-                weaknesses: ["Zero verbal signal detected"],
-                actionableSuggestions: ["Check microphone permissions", "Provide verbal responses to all STAR phases"],
-                biasAndFairnessNote: "Audit aborted due to lack of input signal.",
-                starAnalysis: { situation: "N/A", task: "N/A", action: "N/A", result: "N/A" },
-                keywordCoverage: { found: [], missing: [] },
-                careerDevelopment: { certifications: [], nextSteps: ["Restart Simulation"] },
-                maskedTranscript: { text: "" }
-            });
-            return;
-        }
-
-        setIsGeneratingFeedback(true);
-        try {
-            const feedback = await generateDetailedFeedback({
-                transcript,
-                jobRequirements: activeQuestions.map(q => q.text).join("\n"),
-                cvText: cvText,
-                probeAnalysis: probeAnalysis ? JSON.stringify(probeAnalysis) : undefined,
-                targetRole: "Target Role",
-                companyName: "Target Company",
-                condition: condition,
-                phaseProgression: "Phase 1 -> Phase 2 -> Phase 3",
-            });
-            setDetailedFeedback(feedback);
-        } catch (err) {
-            console.error("Failed to generate final feedback:", err);
-        } finally {
-            setIsGeneratingFeedback(false);
-        }
-    };
-
-    const triggerProbing = async () => {
-        if (isGeneratingProbe) return;
-        // Removed setProbeAnalysis(null) and setActiveTab to keep insights visible
-        setIsProbingActive(true);
-        setProbeLoadingType('question');
-        setIsGeneratingProbe(true);
-        setProbingTranscript(transcript);
-        setProbeCount(prev => prev + 1);
-        try {
-            const currentQ = activeQuestions[currentQuestionIndex] || activeQuestions[0];
-            const probe = await generateProbe({
-                candidateId: participantId || "Anonymous",
-                targetRole: "Not Specified",
-                companyName: "Target Company",
-                cvSummary: cvText || "No CV provided",
-                jobDescription: "Not Specified",
-                currentQuestion: {
-                    text: currentQ.text,
-                    type: CATEGORIES[currentQuestionIndex] || 'Structured Alignment',
-                    difficulty: currentQ.difficulty || 'medium'
-                },
-                sessionPhaseIndex: currentQuestionIndex,
-                questionsAnsweredCount: currentQuestionIndex,
-                priorProbesThisQuestion: askedProbesThisQuestion.current.length > 0 ? askedProbesThisQuestion.current.join(" | ") : "None",
-                candidateAnswer: transcript.slice(questionStartTranscriptLength.current) || transcript,
-                conversationHistory: transcript.slice(questionStartTranscriptLength.current) || transcript,
-            });
-            setCurrentProbe(probe);
-            setProbeRevealCountdown(3);
-            setNextQuestionCountdown(0);
-            askedProbesThisQuestion.current.push(probe.probe);
-            setProbeCompletionMessage(null);
-        } catch (err) {
-            console.error("Failed to generate probe:", err);
-        } finally {
-            setIsGeneratingProbe(false);
-        }
-    };
-
     const handleRecord = async () => {
         if (recordingStatus === 'idle') {
             if (!stream) return;
+
+            // If it's a probe answer, add the 5-second "Opening Mic" delay
+            if (isProbingActive && !isMicOpening && probingTranscript.length > 0) {
+                setIsMicOpening(true);
+                setMicCountdown(5);
+                return;
+            }
+
             setRecordingStatus('recording');
             startTranscription(stream);
         } else {
@@ -504,162 +342,229 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             if (sessionPromiseRef.current) (await sessionPromiseRef.current).close();
             setIsTranscribing(false);
 
-            // Analyze response if it's Act Two
+            // Trigger Analysis if probing is active
             if (isProbingActive && transcript.length > probingTranscript.length) {
                 // Analyze the response to the probe
                 handleAnalyzeProbe();
             }
-            // (Removed auto-trigger so the candidate must click "Done" to proceed to Act Two)
         }
     };
 
-    const handleNextQuestion = async () => {
-        if (recordingStatus === 'recording') await handleRecord();
+    const triggerProbing = async () => {
+        setIsProbingActive(true);
+        setIsGeneratingProbe(true);
+        setActiveTab('plan');
+        const messages = [
+            "You are doing well. Stay focused, the follow-up question will be ready in a while. Till then relax!",
+            "Analyzing your response for key highlights...",
+            "Preparing the next step in our conversation...",
+            "Reviewing context to ensure a smooth transition...",
+            "Just a moment while we set up the next insight..."
+        ];
+        setReassuringMessage(messages[Math.floor(Math.random() * messages.length)]);
+        setProbingTranscript(transcript); // Mark the start of the probe response
+        try {
+            const probe = await generateProbe({
+                candidateId: participantId,
+                targetRole,
+                companyName,
+                cvSummary: cvText || 'Not provided',
+                jobDescription: jobDescription || 'Not provided',
+                currentQuestion: { text: currentQuestion.text, type: 'interview', difficulty: currentQuestion.difficulty },
+                sessionPhaseIndex: currentQuestionIndex,
+                questionsAnsweredCount: currentQuestionIndex,
+                priorProbesThisQuestion: currentProbe ? currentProbe.probe : '',
+                candidateAnswer: transcript,
+                conversationHistory: transcript.slice(-500),
+            });
+            setCurrentProbe(probe);
+        } catch (err) {
+            console.error("Failed to generate probe:", err);
+        } finally {
+            setIsGeneratingProbe(false);
+        }
+    };
 
-        // Calculate final durations for the question
-        const totalProbesDuration = probeDurations.current.reduce((a, b) => a + b, 0);
-
-        // Trigger summary generation for the question just completed
-        const completedQ = activeQuestions[currentQuestionIndex];
-        const currentTranscript = transcript.slice(questionStartTranscriptLength.current, transcript.length);
-        const accumulator: QuestionDataAccumulator = {
-            questionId: completedQ.text,
-            transcript: currentTranscript,
-            phaseAnalyses: [...currentPhaseAnalyses.current],
-            probeAnalyses: [...currentProbeAnalyses.current],
-            timerFramingCondition: timerFramingCondition,
-            responseDurations: {
-                actOne: actOneDuration.current,
-                probes: [...probeDurations.current]
-            }
-        };
-
-        setIsGeneratingSummary(true);
-        const allAnalyses = [...currentProbeAnalyses.current];
-        generateQuestionSummary({
-            accumulator,
-            targetRole: "Candidate",
-            companyName: "Target Company"
-        }).then(summary => {
-            summary.questionText = completedQ.text;
-            summary.allProbeAnalyses = allAnalyses;
-            setQuestionSummaries(prev => [...prev, summary]);
-        }).catch(err => console.error("Summary generation failed:", err))
-            .finally(() => setIsGeneratingSummary(false));
-
-        // Reset accumulators for the new question
-        currentPhaseAnalyses.current = [];
-        currentProbeAnalyses.current = [];
-        actOneDuration.current = 0;
-        probeDurations.current = [];
-
-        if (currentQuestionIndex < activeQuestions.length - 1) {
-            setCurrentQuestionIndex(prev => prev + 1);
-            setStarPhase(0);
-            setSessionSeconds(0);
-            phaseStartTimestamp.current = Date.now();
-            setIsProbingActive(false);
-            setCurrentProbe(null);
-            setProbeAnalysis(null);
-            setProbingTranscript("");
-            setProbeCount(0);
-            setNextQuestionCountdown(0);
-            setAnswerProbeCountdown(0);
-            isCountingDownToAnswer.current = false;
-            askedProbesThisQuestion.current = [];
-            setProbeCompletionMessage(null);
-            lastPhaseTranscriptLength.current = transcript.length;
-            questionStartTranscriptLength.current = transcript.length;
-        } else {
-            setRecordingStatus('uploaded');
-            handleGenerateFinalFeedback();
+    const handleAnalyzeProbe = async () => {
+        if (!currentProbe) return;
+        setIsGeneratingProbe(true);
+        // The reassuring message is now handled by the useEffect hook
+        try {
+            const responseToProbe = transcript.slice(probingTranscript.length || lastPhaseTranscriptLength.current);
+            const analysis = await analyzeProbeResponse({
+                targetRole,
+                companyName,
+                question: currentQuestion.text,
+                probe: currentProbe.probe,
+                probeType: currentProbe.probe_type,
+                probeRationale: currentProbe.rationale,
+                response: responseToProbe,
+                scaffoldPhase: currentProbe.scaffold_phase,
+            });
+            setProbeAnalysis(analysis);
+            setActiveTab('insights');
+        } catch (err) {
+            console.error("Failed to analyze probe response:", err);
+        } finally {
+            setIsGeneratingProbe(false);
         }
     };
 
     const handleNextPhase = async () => {
         if (recordingStatus === 'recording') await handleRecord();
 
-        const phaseTranscript = transcript.slice(lastPhaseTranscriptLength.current);
-        lastPhaseTranscriptLength.current = transcript.length;
+        const newSegment = transcript.slice(lastPhaseTranscriptLength.current).trim();
 
-        if (starPhase < 3) {
-            setStarPhase(prev => {
-                const next = prev + 1;
-                if (next === 3) { // End of Act One
-                    actOneDuration.current = sessionSeconds;
+        const generateAndLog = async (isFinal = false) => {
+            setIsGeneratingProbe(true);
+            let summaryReport: QuestionSummaryReport | null = null;
+            try {
+                summaryReport = await generateQuestionSummary({
+                    accumulator: {
+                        questionId: currentQuestion.text,
+                        transcript: transcript,
+                        phaseAnalyses: [],
+                        probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
+                        timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
+                        responseDurations: {
+                            actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
+                            probes: [],
+                        },
+                    },
+                    targetRole,
+                    companyName,
+                });
+            } catch (err) {
+                console.error('Failed to generate question summary:', err);
+            }
+
+            setSessionLog(prev => [...prev, {
+                questionIndex: currentQuestionIndex,
+                questionText: currentQuestion.text,
+                starPhaseReached: starPhase,
+                transcriptSlice: transcript,
+                probe: currentProbe,
+                probeAnalysis: probeAnalysis,
+                summaryReport: summaryReport,
+            }]);
+
+            if (isFinal) {
+                // Ensure state is settled
+                await new Promise(r => setTimeout(r, 500));
+                setIsGeneratingFeedback(true);
+                setRecordingStatus('uploaded');
+                await handleGenerateFinalFeedback();
+            } else {
+                setActiveTab('plan');
+                // Ensure immediate reassurance if there's any lag in question load
+                setReassuringMessage("The next question is on its way. Be focused, Be ready");
+                setCurrentQuestionIndex(prev => prev + 1);
+                setStarPhase(0);
+                setSessionSeconds(0);
+                phaseStartTimestamp.current = Date.now();
+                setIsProbingActive(false);
+                setCurrentProbe(null);
+                setProbeAnalysis(null);
+                setProbingTranscript("");
+                setIsGeneratingProbe(false);
+            }
+        };
+
+        // Handle Probing Answer
+        if (isProbingActive) {
+            if (newSegment.length < 15) {
+                // Politely nudge for empty transcript
+                setActiveTab('plan');
+                setReassuringMessage("The next question is on its way. Be focused, Be ready");
+
+                // Allow the state update to render before the blocking alert
+                alert("We couldn't catch that response! Please ensure your mic is active and you've provided a follow-up answer. We'll move to the next question for now.");
+
+                // Skip to next question
+                await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
+                return;
+            }
+
+            // Valid response, analyze it
+            setIsGeneratingProbe(true);
+            try {
+                const analysis = await analyzeProbeResponse({
+                    targetRole,
+                    companyName,
+                    question: currentQuestion.text,
+                    probe: currentProbe?.probe || "",
+                    probeType: currentProbe?.probe_type as any || "CLARIFYING",
+                    probeRationale: currentProbe?.rationale || "",
+                    response: newSegment,
+                    scaffoldPhase: currentProbe?.scaffold_phase || 1,
+                });
+
+                setProbeAnalysis(analysis);
+                lastPhaseTranscriptLength.current = transcript.length;
+
+                if (!analysis.proceed) {
+                    // AI wants more depth - trigger iterative Probe (2, 3...)
+                    setActiveTab('plan');
+                    await triggerProbing();
+                } else {
+                    // AI is satisfied - clear state BEFORE final log/transition
+                    setProbeAnalysis(null);
+                    setCurrentProbe(null);
+                    await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
                 }
-                return next;
-            });
+            } catch (err) {
+                console.error("Iterative probing error:", err);
+                setProbeAnalysis(null);
+                setCurrentProbe(null);
+                await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
+            } finally {
+                setIsGeneratingProbe(false);
+            }
+            return;
+        }
+
+        // Standard STAR Progression
+        if (starPhase < 3) {
+            setStarPhase(prev => prev + 1);
+            lastPhaseTranscriptLength.current = transcript.length;
             phaseStartTimestamp.current = Date.now();
         } else {
-            if (transcript.length > questionStartTranscriptLength.current + 30 && !isGeneratingProbe) {
+            // Act 1 Complete -> Trigger First Probe
+            if (decisionCountdown === 0) {
+                setDecisionCountdown(3);
                 triggerProbing();
-            } else {
-                handleNextQuestion();
+                lastPhaseTranscriptLength.current = transcript.length;
             }
         }
-
-        const currentQ = activeQuestions[currentQuestionIndex] || activeQuestions[0];
-        analyzeProbeResponse({
-            targetRole: "Not Specified",
-            companyName: "Target Company",
-            question: currentQ.text,
-            response: phaseTranscript,
-            scaffoldPhase: starPhase
-        }).then(analysis => {
-            currentPhaseAnalyses.current.push(analysis);
-        }).catch(err => console.error("Silent phase analysis failed:", err));
     };
 
-
-
-    const handleAnswerProbeClick = () => {
-        if (recordingStatus === 'idle' && answerProbeCountdown === 0) {
-            setAnswerProbeCountdown(10);
-            isCountingDownToAnswer.current = true;
-        } else if (recordingStatus === 'recording') {
-            handleRecord();
-        }
-    };
-
-    const handleAnalyzeProbe = async () => {
-        if (!currentProbe) return;
-        setProbeLoadingType('analysis');
+    const handleNextQuestion = async () => {
         setIsGeneratingProbe(true);
-        try {
-            const currentQ = activeQuestions[currentQuestionIndex] || activeQuestions[0];
-            const responseToProbe = transcript.slice(probingTranscript.length || lastPhaseTranscriptLength.current);
-            const analysis = await analyzeProbeResponse({
-                targetRole: "Not Specified",
-                companyName: "Target Company",
-                question: currentQ.text,
-                probe: currentProbe.probe,
-                probeType: currentProbe.probe_type,
-                probeRationale: currentProbe.rationale,
-                response: responseToProbe,
-                scaffoldPhase: 3
-            });
-            const analysisWithProbe: ProbeAnalysis = { ...analysis, verbatimProbe: currentProbe.probe };
-            setProbeAnalysis(analysisWithProbe);
-            currentProbeAnalyses.current.push(analysisWithProbe);
-            probeDurations.current.push(sessionSeconds - actOneDuration.current - probeDurations.current.reduce((a, b) => a + b, 0));
-            setActiveTab('analysis');
-
-            if (analysis.proceed) {
-                setProbeCompletionMessage("Insights generated. You've provided sufficient evidence. You may now move to the next question.");
-                setNextQuestionCountdown(0);
-            } else {
-                setProbeCompletionMessage("Further detail is required to meet the interview feedback threshold. Preparing follow-up probe...");
-                setTimeout(() => {
-                    if (!analysis.proceed && isProbingActive) {
-                        triggerProbing();
-                    }
-                }, 7000); // Increased to 7s to allow ample reading time for insights
-            }
-        } catch (err) {
-            console.error("Failed to analyze probe response:", err);
-        } finally {
-            setIsGeneratingProbe(false);
+        if (recordingStatus === 'recording') await handleRecord();
+        if (currentQuestionIndex < activeQuestions.length - 1) {
+            // Log before skipping
+            setSessionLog(prev => [...prev, {
+                questionIndex: currentQuestionIndex,
+                questionText: currentQuestion.text,
+                starPhaseReached: starPhase,
+                transcriptSlice: transcript.slice(lastPhaseTranscriptLength.current),
+                probe: currentProbe,
+                probeAnalysis: probeAnalysis,
+                summaryReport: null,
+            }]);
+            setActiveTab('plan');
+            setReassuringMessage("The next question is on its way. Be focused, Be ready");
+            setCurrentQuestionIndex(prev => prev + 1);
+            setStarPhase(0);
+            setSessionSeconds(0);
+            phaseStartTimestamp.current = Date.now();
+            // Reset probing state
+            setIsProbingActive(false);
+            setCurrentProbe(null);
+            setProbeAnalysis(null);
+            setProbingTranscript("");
+            setActiveTab('plan');
+            setTimeout(() => setIsGeneratingProbe(false), 800);
         }
     };
 
@@ -670,12 +575,64 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             setStarPhase(0);
             setSessionSeconds(0);
             phaseStartTimestamp.current = Date.now();
+            setActiveTab('plan');
+            // Reset probing state
             setIsProbingActive(false);
             setCurrentProbe(null);
             setProbeAnalysis(null);
             setProbingTranscript("");
-            setProbeCount(0);
-            lastPhaseTranscriptLength.current = transcript.slice(0, questionStartTranscriptLength.current).length;
+        }
+    };
+
+    const handleGenerateFinalFeedback = async () => {
+        if (transcript.trim().length < 30) {
+            setDetailedFeedback({
+                noData: true,
+                performanceSummary: "No interview data was recorded. The Coherence Auditor requires verbal input to generate a high-fidelity alignment report. Please ensure your microphone is active and you provide structured STAR responses.",
+                overallStarSynthesis: "Insufficient data for session synthesis.",
+                rubrics: {
+                    starCompletion: 0,
+                    evidenceSpecificity: 0,
+                    roleClarity: 0,
+                    jdAlignment: 0,
+                    communicationClarity: 0,
+                    justifications: {
+                        starCompletion: "No data available",
+                        evidenceSpecificity: "No data available",
+                        roleClarity: "No data available",
+                        jdAlignment: "No data available",
+                        communicationClarity: "No data available"
+                    }
+                },
+                strengths: [],
+                weaknesses: ["Zero verbal signal detected"],
+                actionableSuggestions: ["Check microphone permissions", "Provide verbal responses to all STAR phases"],
+                biasAndFairnessNote: "Audit aborted due to lack of input signal.",
+                starAnalysis: { situation: "N/A", task: "N/A", action: "N/A", result: "N/A" },
+                keywordCoverage: { found: [], missing: [] },
+                careerDevelopment: { certifications: [], nextSteps: ["Restart Simulation"] },
+                maskedTranscript: { text: transcript || "" }
+            });
+            return;
+        }
+
+        setIsGeneratingFeedback(true);
+        try {
+            const feedback = await generateDetailedFeedback({
+                transcript,
+                jobRequirements: activeQuestions.map(q => q.text).join("\n"),
+                cvText,
+                probeAnalysis: probeAnalysis ? JSON.stringify(probeAnalysis) : undefined,
+                targetRole,
+                companyName,
+                condition: 'standard',
+                phaseProgression: `${currentQuestionIndex + 1} of ${activeQuestions.length} questions completed`,
+            });
+            setDetailedFeedback(feedback);
+        } catch (err) {
+            console.error("Failed to generate final feedback:", err);
+        } finally {
+            setIsGeneratingFeedback(false);
         }
     };
 
@@ -711,97 +668,85 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const handleDownloadReport = () => {
         if (!detailedFeedback) return;
 
-        const questionSummariesContent = questionSummaries.length > 0 ? `
-## 12. DETAILED QUESTION SUMMARIES & PROBING AUDITS
-${questionSummaries.map((summary, idx) => `
-### QUESTION ${idx + 1}: ${summary.questionText}
-
-#### Answer Overview
-${summary.answerOverview}
-
-#### Key Strengths
-${summary.strengths.map(s => `- ${s}`).join('\n')}
-
-#### Probing Engagement Audit
-${summary.probeEngagement}
-
-${summary.allProbeAnalyses && summary.allProbeAnalyses.length > 0 ? `
-#### Real-time Probes Asked
-${summary.allProbeAnalyses.map((p, pIdx) => `
-**Probe ${pIdx + 1}:** "${p.verbatimProbe}"
-- **Interpretation:** ${p.interpretation}
-- **Successful:** ${p.probe_successful ? 'YES' : 'NO'}
-- **Action Taken:** ${p.reason}
-`).join('\n')}
-` : ''}
-
-#### Practice Suggestion
-${summary.practiceTask}
-
----
-`).join('\n')}
-` : '';
-
+        const rd = detailedFeedback.rubrics;
         const reportContent = `
-# ASCEND FEEDBACK REPORT
+# ASCEND COHERENCE AUDIT REPORT
 Generated on: ${new Date().toLocaleString()}
+Target Role: ${targetRole} at ${companyName}
 Session ID: ${Math.random().toString(36).substring(2, 15).toUpperCase()}
 
-## 1. OVERALL SUMMARY
+## 1. EXECUTIVE SUMMARY
 ${detailedFeedback.performanceSummary}
 
-## 2. SESSION-WIDE STAR PERFORMANCE
-${detailedFeedback.overallStarSynthesis}
+## 2. OVERALL STAR SYNTHESIS
+${detailedFeedback.overallStarSynthesis || 'N/A'}
 
-## 3. Assessment Guide
-- STAR Completion: ${detailedFeedback.rubrics.starCompletion}%
-- Evidence Specificity: ${detailedFeedback.rubrics.evidenceSpecificity}%
-- Role Clarity: ${detailedFeedback.rubrics.roleClarity}%
-- JD Alignment: ${detailedFeedback.rubrics.jdAlignment}%
-- Communication Clarity: ${detailedFeedback.rubrics.communicationClarity}%
+## 3. PERFORMANCE RUBRICS (1–5 Scale)
+- STAR Completion:      ${rd?.starCompletion ?? 0}/5 — ${rd?.justifications?.starCompletion || ''}
+- Evidence Specificity: ${rd?.evidenceSpecificity ?? 0}/5 — ${rd?.justifications?.evidenceSpecificity || ''}
+- Role Clarity:         ${rd?.roleClarity ?? 0}/5 — ${rd?.justifications?.roleClarity || ''}
+- JD Alignment:         ${rd?.jdAlignment ?? 0}/5 — ${rd?.justifications?.jdAlignment || ''}
+- Communication:        ${rd?.communicationClarity ?? 0}/5 — ${rd?.justifications?.communicationClarity || ''}
 
-## 3. KEY STRENGTHS
-${detailedFeedback.strengths.map(s => `- ${s}`).join('\n')}
+## 4. KEY STRENGTHS
+${detailedFeedback.strengths.map(s => `+ ${s}`).join('\n')}
 
-## 4. IMPROVEMENT AREAS
+## 5. IMPROVEMENT AREAS
 ${detailedFeedback.weaknesses.map(w => `- ${w}`).join('\n')}
 
-## 5. STAR ANALYSIS
+## 6. STAR ANALYSIS
 - Situation: ${detailedFeedback.starAnalysis.situation}
-- Task: ${detailedFeedback.starAnalysis.task}
-- Action: ${detailedFeedback.starAnalysis.action}
-- Result: ${detailedFeedback.starAnalysis.result}
+- Task:      ${detailedFeedback.starAnalysis.task}
+- Action:    ${detailedFeedback.starAnalysis.action}
+- Result:    ${detailedFeedback.starAnalysis.result}
 
-## 6. KEYWORD COVERAGE
-- Found: ${detailedFeedback.keywordCoverage.found.join(', ')}
-- Missing: ${detailedFeedback.keywordCoverage.missing.join(', ')}
-
-## 7. Thinking Skill Areas
-- Knowledge & Learning (Gc): ${detailedFeedback.chcCognitiveDimensions?.crystallisedIntelligence.score}% (${detailedFeedback.chcCognitiveDimensions?.crystallisedIntelligence.evidenceBasis})
-- Problem Solving Ability (Gf): ${detailedFeedback.chcCognitiveDimensions?.fluidIntelligence.score}% (${detailedFeedback.chcCognitiveDimensions?.fluidIntelligence.evidenceBasis})
-- Practical Reasoning (Gq): ${detailedFeedback.chcCognitiveDimensions?.practicalReasoning.score}% (${detailedFeedback.chcCognitiveDimensions?.practicalReasoning.evidenceBasis})
-- Correlation Note: ${detailedFeedback.chcCognitiveDimensions?.overallCHCNote}
+## 7. KEYWORD COVERAGE
+Found:   ${detailedFeedback.keywordCoverage.found.join(', ')}
+Missing: ${detailedFeedback.keywordCoverage.missing.join(', ')}
 
 ## 8. ACTIONABLE REMEDIATION
 ${detailedFeedback.actionableSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
-## 9. CAREER DEVELOPMENT
-- Recommended Certifications: ${detailedFeedback.careerDevelopment.certifications.join(', ')}
-- Next Steps: ${detailedFeedback.careerDevelopment.nextSteps.join(', ')}
+## 9. CHC COGNITIVE SIGNALS (McGrew, 2009)
+${detailedFeedback.chcCognitiveDimensions ? `- Crystallised Intelligence (Gc): ${detailedFeedback.chcCognitiveDimensions.crystallisedIntelligence?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.crystallisedIntelligence?.evidenceBasis || ''}
+- Fluid Intelligence (Gf):       ${detailedFeedback.chcCognitiveDimensions.fluidIntelligence?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.fluidIntelligence?.evidenceBasis || ''}
+- Practical Reasoning (Gq):      ${detailedFeedback.chcCognitiveDimensions.practicalReasoning?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.practicalReasoning?.evidenceBasis || ''}
+Note: ${detailedFeedback.chcCognitiveDimensions.overallCHCNote || 'N/A'}` : 'CHC data unavailable.'}
 
-## 10. INTEGRITY & SAFETY AUDIT
-- Violation Detected: ${detailedFeedback.integrityViolation?.detected ? 'YES' : 'NO'}
-${detailedFeedback.integrityViolation?.detected ? `- Note: ${detailedFeedback.integrityViolation.note}` : ''}
-- Bias & Fairness Note: ${detailedFeedback.biasAndFairnessNote}
+## 10. SDT MERIT VECTORS (Deci & Ryan, 2000)
+${detailedFeedback.meritVectors ? `- Autonomy:   ${detailedFeedback.meritVectors.autonomy.score}/100 — ${detailedFeedback.meritVectors.autonomy.evidenceBasis}
+- Competence: ${detailedFeedback.meritVectors.competence.score}/100 — ${detailedFeedback.meritVectors.competence.evidenceBasis}
+- Relatedness:${detailedFeedback.meritVectors.relatedness.score}/100 — ${detailedFeedback.meritVectors.relatedness.evidenceBasis}` : 'SDT data unavailable.'}
 
-## 11. INTERVIEW TRANSCRIPT
-${detailedFeedback.maskedTranscript?.text || transcript}
+## 11. PROCEDURAL JUSTICE DIMENSIONS (Lind et al., 1990)
+${detailedFeedback.proceduralJusticeDimensions ? Object.entries(detailedFeedback.proceduralJusticeDimensions).filter(([k]) => k !== 'overallPJNote').map(([k, v]: [string, any]) => `- ${k.charAt(0).toUpperCase() + k.slice(1)}: ${v.score}/100 — ${v.evidenceBasis}`).join('\n') + `\nNote: ${detailedFeedback.proceduralJusticeDimensions.overallPJNote}` : 'PJ data unavailable.'}
 
-${questionSummariesContent}
+## 12. SCAFFOLDED LEARNING (Vygotsky, 1978)
+${detailedFeedback.scaffoldedLearningSignal ? `- ZPD Observation: ${detailedFeedback.scaffoldedLearningSignal.zpdProgressionObservation || 'N/A'}
+- Dependency: ${detailedFeedback.scaffoldedLearningSignal.scaffoldDependency?.interpretation || 'N/A'}
+- Lower Boundary: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.lowerBoundary || 'N/A'}
+- Upper Boundary: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.upperBoundary || 'N/A'}
+- Dev Gap: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.developmentGap || 'N/A'}` : 'Vygotsky data unavailable.'}
+
+## 13. CAREER DEVELOPMENT
+Recommended Certs: ${detailedFeedback.careerDevelopment.certifications.join(', ')}
+Next Steps:        ${detailedFeedback.careerDevelopment.nextSteps.join(', ')}
+
+## 14. RESEARCH SIGNALS
+- Algorithmic Aversion: ${detailedFeedback.algorithmicAversionSignal?.aversionDetected ? 'DETECTED' : 'Not Detected'} — ${detailedFeedback.algorithmicAversionSignal?.aversionEvidence || 'No evidence.'}
+- Social Identity:     ${detailedFeedback.socialIdentityAwareness?.activated ? `Active (${detailedFeedback.socialIdentityAwareness.dominantMotivation || 'Balanced'})` : 'Inactive'} — ${detailedFeedback.socialIdentityAwareness?.scopeNote}
+
+## 15. INTEGRITY & SAFETY AUDIT
+Violation Detected: ${detailedFeedback.integrityViolation?.detected ? 'YES' : 'NO'}
+${detailedFeedback.integrityViolation?.detected ? `Note: ${detailedFeedback.integrityViolation.note}` : ''}
+Bias & Fairness: ${typeof detailedFeedback.biasAndFairnessNote === 'string' ? detailedFeedback.biasAndFairnessNote : (detailedFeedback.biasAndFairnessNote as any)?.overallFairnessNote || 'See full report.'}
+
+## 16. INTERVIEW TRANSCRIPT
+${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.maskedTranscript as any)?.text : detailedFeedback.maskedTranscript || transcript}
 
 ---
-© ${new Date().getFullYear()} Ascend Platform. Confidential Performance Report.
-`.trim();
+© ${new Date().getFullYear()} Ascend Platform. Confidential Performance Intelligence Report.
+        `.trim();
 
         const blob = new Blob([reportContent], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
@@ -814,9 +759,108 @@ ${questionSummariesContent}
         URL.revokeObjectURL(url);
     };
 
+    const handleDownloadQuestionReport = (entry: SessionEntry) => {
+        if (!entry.summaryReport) return;
+        const sr = entry.summaryReport;
+        const pa = entry.probeAnalysis;
+
+        let content = `
+# RESPONSE ANALYSIS REPORT: Q${entry.questionIndex + 1}
+Generated on: ${new Date().toLocaleString()}
+Participant: ${participantId}
+
+## 1. QUESTION CONTEXT
+"${entry.questionText}"
+
+## 2. ANSWER OVERVIEW
+${sr.answerOverview}
+
+## 3. STAR PERFORMANCE
+Phase Reached: ${STAR_LABELS[entry.starPhaseReached]}
+
+## 4. KEY STRENGTHS
+${sr.strengths.map(s => `- ${s}`).join('\n')}
+
+## 5. DEVELOPMENT POINTS
+${sr.developmentPoints.map(dp => `### ${dp.gap}
+- Why it matters: ${dp.whyItMatters}
+- Instruction: ${dp.instruction}`).join('\n\n')}
+
+## 6. PROBE ENGAGEMENT & CORRELATION
+### Engagement Narrative
+${sr.probeEngagement}
+
+### Act-Probe Correlation
+${sr.probeCorrelation}
+
+### Integrated Excellence Guidance
+${sr.integratedCoaching}
+
+${pa ? `
+## 7. HIGH-FIDELITY PSYCHOLOGICAL SIGNALS
+### SDT MERIT VECTORS
+- Autonomy:    ${pa.merit_vectors.autonomy}/100
+- Competence:  ${pa.merit_vectors.competence}/100
+- Relatedness: ${pa.merit_vectors.relatedness}/100
+- Lowest Vector: ${pa.merit_vectors.lowest_vector.toUpperCase()}
+
+### CHC COGNITIVE SIGNALS
+- Crystallised Intelligence (Gc): ${pa.chc_signals.gc.toUpperCase()}
+- Fluid Reasoning (Gf):          ${pa.chc_signals.gf.toUpperCase()}
+- Quantitative/Technical (Gq):   ${pa.chc_signals.gq.toUpperCase()}
+
+### PROCEDURAL JUSTICE (PJ) OBSERVATIONS
+${pa.pj_observations.map(obs => `- ${obs}`).join('\n')}
+
+### GOFFMAN PRESENTATION SCORES
+- Front Stage (Professional): ${pa.goffman_scores.front_stage}/100
+- Back Stage (Authentic):     ${pa.goffman_scores.back_stage}/100
+
+### SCAFFOLD ASSESSMENT
+- Dependency: ${pa.scaffold_dependency_signal.replace(/_/g, ' ').toUpperCase()}
+- Interpretation: ${pa.interpretation}
+- Decision: ${pa.reason}
+
+### COACHING GUIDANCE
+- Signal: ${pa.coaching_guidance?.framework_gap || 'N/A'}
+- Instruction: ${pa.coaching_guidance?.instruction || 'N/A'}
+- Example PHRASE: "${pa.coaching_guidance?.example_phrase || 'N/A'}"
+
+### REAL-TIME COACHING TIP
+${pa.coaching_tip || 'Focus on maintaining STAR structure.'}
+` : ''}
+
+## 8. TRANSCRIPT RECORD
+### ACT 1 (STAR RESPONSE)
+${entry.transcriptSlice || "Transcript unavailable for this segment."}
+
+${entry.probeAnalysis ? `
+### PROBE RESPONSE
+${transcript.slice(probingTranscript.length) || "Transcript unavailable for probe response."}
+` : ''}
+
+## 9. ONE THING TO PRACTISE
+${sr.practiceTask}
+
+---
+Generated by AscendX Coherence Auditor
+Professional Performance Intelligence
+`.trim();
+
+        const blob = new Blob([content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Response_Q${entry.questionIndex + 1}_${participantId}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     if (recordingStatus === 'uploaded') {
         return (
-            <div className={`min-h-screen w-screen bg-slate-50 flex flex-col items-center p-8 overflow-y-auto custom-scrollbar animate-fade-in relative ${isTourActive ? 'z-[11000]' : 'z-[8000]'}`}>
+            <div className="min-h-screen w-screen bg-slate-50 flex flex-col items-center p-8 overflow-y-auto custom-scrollbar animate-fade-in relative">
                 <div className="max-w-7xl w-full space-y-12">
                     <div id="report-header" className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 border-b border-slate-200 pb-12">
                         <div className="flex flex-col gap-4">
@@ -825,7 +869,7 @@ ${questionSummariesContent}
                                     <FileText className="text-white" size={32} />
                                 </div>
                                 <div>
-                                    <h1 className="text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none">Feedback Report</h1>
+                                    <h1 className="text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none">Coherence Audit</h1>
                                     <p className="text-slate-500 font-bold uppercase tracking-[0.3em] text-[10px] mt-2">Professional Performance Intelligence Report</p>
                                 </div>
                             </div>
@@ -877,8 +921,9 @@ ${questionSummariesContent}
                     ) : detailedFeedback ? (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             {/* Left Column: Summary & Rubrics */}
-                            <div id="report-performance-summary" className="md:col-span-2 space-y-8">
-                                <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                            <div className="md:col-span-2 space-y-8">
+                                {/* Performance Summary */}
+                                <section id="report-performance-summary" className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                     <div className="flex items-center gap-3 mb-6">
                                         <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
                                             <TrendingUp size={20} />
@@ -886,23 +931,40 @@ ${questionSummariesContent}
                                         <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Performance Summary</h3>
                                     </div>
                                     <p className="text-slate-700 leading-relaxed font-medium">{detailedFeedback.performanceSummary}</p>
+                                    {detailedFeedback.overallStarSynthesis && (
+                                        <div className="mt-6 p-5 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-2">STAR Session Synthesis</p>
+                                            <p className="text-sm font-medium text-slate-700 leading-relaxed">{detailedFeedback.overallStarSynthesis}</p>
+                                        </div>
+                                    )}
 
-                                    <div className="mt-8 p-6 bg-indigo-50 rounded-[32px] border border-indigo-100">
-                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mb-3 flex items-center gap-2">
-                                            <Brain size={14} /> Session-Wide STAR Synthesis
-                                        </h4>
-                                        <p className="text-xs font-bold text-slate-800 leading-relaxed italic">
-                                            "{detailedFeedback.overallStarSynthesis}"
-                                        </p>
-                                    </div>
-
-                                    <div id="report-rubrics-grid" className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
-                                        {Object.entries(detailedFeedback.rubrics || {}).map(([key, value]) => {
-                                            if (typeof value !== 'number') return null;
+                                    {/* Rubrics — 5 scores as progress bars */}
+                                    <div id="report-rubrics-grid" className="mt-8 space-y-4">
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Professional Rubrics (1–5 Scale)</p>
+                                        {(detailedFeedback?.rubrics ? [
+                                            { key: 'starCompletion', label: 'STAR Completion' },
+                                            { key: 'evidenceSpecificity', label: 'Evidence Specificity' },
+                                            { key: 'roleClarity', label: 'Role Clarity' },
+                                            { key: 'jdAlignment', label: 'JD Alignment' },
+                                            { key: 'communicationClarity', label: 'Communication Clarity' },
+                                        ] as const : []).map(({ key, label }) => {
+                                            const score = detailedFeedback.rubrics?.[key] ?? 0;
+                                            const justification = detailedFeedback.rubrics?.justifications?.[key];
                                             return (
-                                                <div key={key} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center text-center">
-                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">{key.replace(/([A-Z])/g, ' $1')}</span>
-                                                    <span className="text-2xl font-black text-indigo-600">{value}%</span>
+                                                <div key={key} className="group">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</span>
+                                                        <span className="text-base font-black text-indigo-600">{score}<span className="text-slate-300 font-bold text-xs">/5</span></span>
+                                                    </div>
+                                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div
+                                                            className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all duration-700"
+                                                            style={{ width: `${(score / 5) * 100}%` }}
+                                                        />
+                                                    </div>
+                                                    {justification && (
+                                                        <p className="text-[10px] font-medium text-slate-500 mt-1 italic">{justification}</p>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -914,12 +976,12 @@ ${questionSummariesContent}
                                         <Award size={16} /> STAR Analysis
                                     </h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {Object.entries(detailedFeedback.starAnalysis || {}).map(([key, value]) => (
+                                        {(detailedFeedback.starAnalysis && typeof detailedFeedback.starAnalysis === 'object') ? Object.entries(detailedFeedback.starAnalysis).map(([key, value]) => (
                                             <div key={key} className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
                                                 <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-2">{key}</h4>
                                                 <p className="text-xs font-medium text-slate-700 leading-relaxed">{value}</p>
                                             </div>
-                                        ))}
+                                        )) : null}
                                     </div>
                                 </section>
 
@@ -959,7 +1021,7 @@ ${questionSummariesContent}
                                             <CheckCircle2 size={16} /> Key Strengths
                                         </h3>
                                         <ul className="space-y-4">
-                                            {(detailedFeedback.strengths || []).map((s, i) => (
+                                            {(detailedFeedback?.strengths || []).map((s, i) => (
                                                 <li key={i} className="flex gap-3 text-xs font-medium text-slate-700">
                                                     <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1.5 shrink-0" />
                                                     {s}
@@ -972,7 +1034,7 @@ ${questionSummariesContent}
                                             <ShieldAlert size={16} /> Improvement Areas
                                         </h3>
                                         <ul className="space-y-4">
-                                            {(detailedFeedback.weaknesses || []).map((w, i) => (
+                                            {(detailedFeedback?.weaknesses || []).map((w, i) => (
                                                 <li key={i} className="flex gap-3 text-xs font-medium text-slate-700">
                                                     <div className="w-1.5 h-1.5 bg-rose-500 rounded-full mt-1.5 shrink-0" />
                                                     {w}
@@ -982,46 +1044,211 @@ ${questionSummariesContent}
                                     </section>
                                 </div>
 
-                                <section id="report-chc-clusters" className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
-                                            <Brain size={16} /> Cognitive Merit Clusters (CHC)
+                                {/* CHC Cognitive Signals */}
+                                {detailedFeedback.chcCognitiveDimensions && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm" id="report-chc-clusters">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <Brain size={16} /> CHC Cognitive Signals
                                         </h3>
-                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">McGrew (2009) Framework</span>
-                                    </div>
-                                    {detailedFeedback.chcCognitiveDimensions ? (
-                                        <div className="space-y-6">
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                {[
-                                                    { id: 'crystallised', label: 'Gc: knowledge', data: detailedFeedback.chcCognitiveDimensions.crystallisedIntelligence },
-                                                    { id: 'fluid', label: 'Gf: reasoning', data: detailedFeedback.chcCognitiveDimensions.fluidIntelligence },
-                                                    { id: 'practical', label: 'Gq: performance', data: detailedFeedback.chcCognitiveDimensions.practicalReasoning }
-                                                ].map((cluster) => (
-                                                    <div key={cluster.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                                        <div className="flex justify-between items-center mb-2">
-                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{cluster.label}</span>
-                                                            <span className="text-sm font-black text-indigo-600">{cluster.data.score}%</span>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">McGrew (2009) — AI-generated proxy, exploratory</p>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                            {([
+                                                { key: 'crystallisedIntelligence', label: 'Crystallised (Gc)', color: 'indigo' },
+                                                { key: 'fluidIntelligence', label: 'Fluid (Gf)', color: 'violet' },
+                                                { key: 'practicalReasoning', label: 'Practical (Gq)', color: 'blue' },
+                                            ] as const).map(({ key, label }) => {
+                                                const dim = detailedFeedback.chcCognitiveDimensions![key];
+                                                const score = dim?.score ?? null;
+                                                return (
+                                                    <div key={key} className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">{label}</p>
+                                                        <div className="flex items-end gap-2 mb-2">
+                                                            <span className="text-3xl font-black text-indigo-600">{score ?? '—'}</span>
+                                                            {score !== null && score !== undefined && <span className="text-slate-300 font-bold text-sm mb-1">/100</span>}
                                                         </div>
-                                                        <p className="text-[10px] text-slate-600 leading-tight">{cluster.data.evidenceBasis}</p>
+                                                        <div className="h-1.5 bg-slate-200 rounded-full mb-3">
+                                                            <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${score ?? 0}%` }} />
+                                                        </div>
+                                                        <p className="text-[10px] font-medium text-slate-600 leading-snug">{dim?.evidenceBasis}</p>
                                                     </div>
-                                                ))}
-                                            </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {detailedFeedback.chcCognitiveDimensions.overallCHCNote && (
                                             <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                                                <h4 className="text-[9px] font-black uppercase tracking-widest text-indigo-600 mb-1">Audit Correlation Note</h4>
-                                                <p className="text-xs font-medium text-slate-700 italic">"{detailedFeedback.chcCognitiveDimensions.overallCHCNote}"</p>
+                                                <p className="text-[10px] font-medium text-indigo-800 italic">{detailedFeedback.chcCognitiveDimensions.overallCHCNote}</p>
+                                            </div>
+                                        )}
+                                    </section>
+                                )}
+
+                                {/* SDT Merit Vectors */}
+                                {detailedFeedback.meritVectors && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <TrendingUp size={16} /> SDT Merit Vectors
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Deci & Ryan (2000) — Self-Determination Theory</p>
+                                        <div className="space-y-4">
+                                            {(['autonomy', 'competence', 'relatedness'] as const).map((key) => {
+                                                const v = detailedFeedback.meritVectors?.[key];
+                                                if (!v) return null;
+                                                const lowest = detailedFeedback.meritVectors?.lowestVector === key;
+                                                return (
+                                                    <div key={key} className={`p-4 rounded-2xl border ${lowest ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 capitalize">{key}</span>
+                                                                {lowest && <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[8px] font-black uppercase tracking-widest rounded-full">Priority</span>}
+                                                            </div>
+                                                            <span className={`text-base font-black ${lowest ? 'text-rose-600' : 'text-indigo-600'}`}>{v.score}</span>
+                                                        </div>
+                                                        <div className="h-1.5 bg-white rounded-full mb-2">
+                                                            <div className={`h-full rounded-full ${lowest ? 'bg-rose-400' : 'bg-indigo-400'}`} style={{ width: `${v.score}%` }} />
+                                                        </div>
+                                                        <p className="text-[10px] font-medium text-slate-600 leading-snug">{v.evidenceBasis}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </section>
+                                )}
+
+                                {/* Goffman Impression Management */}
+                                {detailedFeedback.impressionManagementScore && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <Award size={16} /> Impression Management
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Goffman (1959) — Front-Stage vs. Back-Stage</p>
+                                        <div className="grid grid-cols-2 gap-4 mb-4">
+                                            {[{ label: 'Front Stage', key: 'frontStageScore' as const, desc: 'Polished, professional' },
+                                            { label: 'Back Stage', key: 'backStageScore' as const, desc: 'Authentic, genuine' }].map(({ label, key, desc }) => {
+                                                const score = detailedFeedback.impressionManagementScore?.[key] ?? 0;
+                                                return (
+                                                    <div key={key} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
+                                                        <p className="text-[9px] text-slate-400 mb-3">{desc}</p>
+                                                        <span className="text-3xl font-black text-indigo-600">{score}</span>
+                                                        <span className="text-slate-300 font-bold text-sm">/100</span>
+                                                        <div className="mt-2 h-1.5 bg-slate-200 rounded-full">
+                                                            <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${score}%` }} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {detailedFeedback.impressionManagementScore && (
+                                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Dominant Mode: {detailedFeedback.impressionManagementScore.dominantMode?.replace(/_/g, ' ') || 'N/A'}</p>
+                                                <p className="text-[10px] font-medium text-indigo-800">{detailedFeedback.impressionManagementScore.feedbackImplication}</p>
+                                            </div>
+                                        )}
+                                    </section>
+                                )}
+
+                                {/* Procedural Justice Dimensions */}
+                                {detailedFeedback.proceduralJusticeDimensions && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <Scale size={16} /> Procedural Justice
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Lind et al. (1990) — Candidate Perception Metrics</p>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                                            {(['voice', 'validation', 'respect', 'neutrality', 'motivation', 'explanation'] as const).map((key) => {
+                                                const d = detailedFeedback.proceduralJusticeDimensions?.[key];
+                                                if (!d) return null;
+                                                return (
+                                                    <div key={key} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{key}</span>
+                                                            <span className="text-sm font-black text-indigo-600">{d.score}</span>
+                                                        </div>
+                                                        <div className="h-1 bg-slate-200 rounded-full mb-2">
+                                                            <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${d.score}%` }} />
+                                                        </div>
+                                                        <p className="text-[9px] text-slate-500 leading-tight line-clamp-2">{d.evidenceBasis}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {detailedFeedback.proceduralJusticeDimensions?.overallPJNote && (
+                                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                <p className="text-[10px] font-medium text-indigo-800 italic">{detailedFeedback.proceduralJusticeDimensions.overallPJNote}</p>
+                                            </div>
+                                        )}
+                                    </section>
+                                )}
+
+                                {/* Vygotsky Scaffolded Learning */}
+                                {detailedFeedback.scaffoldedLearningSignal && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <Layers size={16} /> Scaffolded Learning
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Vygotsky (1978) — ZPD Induction Analysis</p>
+                                        <div className="space-y-4">
+                                            <div className="p-5 bg-slate-900 rounded-[24px]">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-2">ZPD Progression Observation</p>
+                                                <p className="text-xs text-white/90 leading-relaxed italic">"{detailedFeedback.scaffoldedLearningSignal.zpdProgressionObservation}"</p>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Lower Boundary</p>
+                                                    <p className="text-xs font-bold text-slate-700">{detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.lowerBoundary || 'N/A'}</p>
+                                                </div>
+                                                <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Upper Boundary</p>
+                                                    <p className="text-xs font-bold text-indigo-900">{detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.upperBoundary || 'N/A'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-1">Development Gap Identified</p>
+                                                <p className="text-xs font-medium text-emerald-800 leading-snug">{detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.developmentGap || 'N/A'}</p>
                                             </div>
                                         </div>
-                                    ) : (
-                                        <p className="text-xs text-slate-400 italic">Cognitive clusters unavailable.</p>
-                                    )}
-                                </section>
+                                    </section>
+                                )}
+
+                                {/* Algorithmic Aversion & Social Identity */}
+                                {(detailedFeedback.algorithmicAversionSignal || detailedFeedback.socialIdentityAwareness) && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-6 flex items-center gap-2">
+                                            <ShieldCheck size={16} /> Research Guardrails
+                                        </h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {detailedFeedback.algorithmicAversionSignal && (
+                                                <div className={`p-5 rounded-2xl border ${detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Algorithmic Aversion</p>
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <div className={`w-2 h-2 rounded-full ${detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                                        <span className="text-xs font-black uppercase">{detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'Detected' : 'Clear'}</span>
+                                                    </div>
+                                                    <p className="text-[10px] font-medium text-slate-600 leading-relaxed">{detailedFeedback.algorithmicAversionSignal.aversionEvidence || "No indicators of algorithmic scepticism detected in current verbal performance."}</p>
+                                                </div>
+                                            )}
+                                            {detailedFeedback.socialIdentityAwareness && (
+                                                <div className={`p-5 rounded-2xl border ${detailedFeedback.socialIdentityAwareness.activated ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Social Identity Aware</p>
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <span className="text-xs font-black uppercase text-indigo-600">{detailedFeedback.socialIdentityAwareness.activated ? 'Activated' : 'Silent'}</span>
+                                                        {detailedFeedback.socialIdentityAwareness.activated && (
+                                                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[8px] font-black rounded-full uppercase">{detailedFeedback.socialIdentityAwareness.dominantMotivation}</span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-[10px] font-medium text-slate-600 leading-relaxed">{detailedFeedback.socialIdentityAwareness.scopeNote}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </section>
+                                )}
 
                                 <section id="report-actionable-insights" className="bg-slate-900 text-white p-8 rounded-[40px] shadow-xl">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-indigo-400 mb-6 flex items-center gap-2">
-                                        <Brain size={16} /> Actionable Insights
+                                        <Brain size={16} /> Actionable Remediation
                                     </h3>
                                     <div className="grid grid-cols-1 gap-4">
-                                        {(detailedFeedback.actionableSuggestions || []).map((s, i) => (
+                                        {(detailedFeedback?.actionableSuggestions || []).map((s, i) => (
                                             <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-start gap-4">
                                                 <div className="w-6 h-6 bg-indigo-500/20 rounded-lg flex items-center justify-center text-indigo-400 shrink-0 font-black text-xs">
                                                     {i + 1}
@@ -1068,14 +1295,14 @@ ${questionSummariesContent}
 
                                 <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-6 flex items-center gap-2">
-                                        <Award size={16} /> Recommended Certifications
+                                        <Award size={16} /> Recommended Certs
                                     </h3>
                                     <div className="space-y-3">
-                                        {(detailedFeedback.careerDevelopment?.certifications || []).map((c, i) => (
+                                        {(detailedFeedback?.careerDevelopment?.certifications || []).map((c, i) => (
                                             <div key={i} className="px-4 py-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-black uppercase tracking-widest border border-indigo-100">
                                                 {c}
                                             </div>
-                                        )) || <p className="text-xs text-slate-400 italic">No certifications listed.</p>}
+                                        ))}
                                     </div>
                                 </section>
 
@@ -1084,21 +1311,21 @@ ${questionSummariesContent}
                                         <BookOpen size={16} /> Next Steps
                                     </h3>
                                     <ul className="space-y-4">
-                                        {(detailedFeedback.careerDevelopment?.nextSteps || []).map((s, i) => (
+                                        {(detailedFeedback?.careerDevelopment?.nextSteps || []).map((s, i) => (
                                             <li key={i} className="flex gap-3 text-xs font-medium text-slate-700">
                                                 <div className="w-5 h-5 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0 font-black text-[10px]">
                                                     {i + 1}
                                                 </div>
                                                 {s}
                                             </li>
-                                        )) || <p className="text-xs text-slate-400 italic">No next steps provided.</p>}
+                                        ))}
                                     </ul>
                                 </section>
 
                                 <section className="bg-amber-50 p-6 rounded-[32px] border border-amber-100">
                                     <h4 className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Bias & Fairness Audit</h4>
                                     <p className="text-[11px] font-medium text-amber-800 leading-relaxed italic">
-                                        {detailedFeedback.biasAndFairnessNote || "Procedural justice audit complete."}
+                                        "{detailedFeedback.biasAndFairnessNote}"
                                     </p>
                                 </section>
 
@@ -1108,7 +1335,7 @@ ${questionSummariesContent}
                                     </h3>
                                     <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 max-h-96 overflow-y-auto custom-scrollbar">
                                         <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
-                                            {detailedFeedback.maskedTranscript?.text || transcript || "No transcript data available."}
+                                            {typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.maskedTranscript as any)?.text : detailedFeedback.maskedTranscript || transcript || "No transcript data available."}
                                         </p>
                                     </div>
                                 </section>
@@ -1135,10 +1362,10 @@ ${questionSummariesContent}
     }
 
     return (
-        <div id="ascend-platform-layout" className={`flex flex-col md:flex-row h-screen w-screen bg-slate-100 overflow-hidden ${dyslexiaFont ? 'font-dyslexia-friendly' : ''}`}>
+        <div className={`flex flex-col md:flex-row h-screen w-screen bg-slate-100 overflow-hidden ${dyslexiaFont ? 'font-dyslexia-friendly' : ''}`}>
             {/* Reflection Overlay with STAR APPROACH Sidebar restored */}
             {isBreakActive && (
-                <div id="reflective-break-session" className={`fixed inset-0 bg-white/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fade-in overflow-hidden ${isTourActive ? 'z-[11000]' : 'z-[5000]'}`}>
+                <div className="fixed inset-0 z-[5000] bg-white/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-fade-in overflow-hidden">
                     {isWarmupActive && (
                         <div className="absolute inset-0 z-[6000] bg-slate-900 flex flex-col items-center justify-center text-white text-center">
                             <span className="text-xs font-black uppercase tracking-[0.4em] text-indigo-400 mb-4">Resuming in</span>
@@ -1161,16 +1388,16 @@ ${questionSummariesContent}
                                 <div className="p-3 bg-indigo-600 text-white rounded-2xl">
                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 </div>
-                                <h2 className="text-2xl font-black uppercase tracking-tighter">Reflective Break Session</h2>
+                                <h2 className="text-2xl font-black uppercase tracking-tighter">Coherence Break</h2>
                             </div>
                             <span className="text-2xl font-black font-mono tracking-tighter tabular-nums">{Math.floor(breakTimeRemaining / 60)}:{String(breakTimeRemaining % 60).padStart(2, '0')}</span>
                         </div>
 
-                        <div id="reflective-break-content" className="flex-1 flex flex-col md:flex-row gap-8 overflow-hidden">
+                        <div className="flex-1 flex flex-col md:flex-row gap-8 overflow-hidden">
                             {/* STAR Sidebar in Break Session */}
                             <aside className="w-full md:w-[340px] shrink-0 bg-white border border-slate-200 rounded-[32px] p-8 space-y-8 flex flex-col shadow-xl">
                                 <div>
-                                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Take a moment to read the question and organize your thoughts for a clear, confident response.</h3>
+                                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Current Coherence Loop</h3>
                                     <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 mb-6">
                                         <p className="text-[9px] font-black text-indigo-600 uppercase mb-1">{CATEGORIES[currentQuestionIndex] || 'Structured Alignment'}</p>
                                         <p className="text-[11px] text-slate-600 font-medium leading-tight italic">"{currentQuestion.text}"</p>
@@ -1194,14 +1421,14 @@ ${questionSummariesContent}
                             {/* Thought Space in Break Session */}
                             <div className="flex-1 flex flex-col bg-white rounded-[40px] p-10 border border-slate-200 shadow-xl overflow-hidden group">
                                 <div className="flex items-center justify-between mb-6 shrink-0">
-                                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Interview Prep Board</h3>
-                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest animate-pulse"></span>
+                                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Coherence Auditor Sandbox</h3>
+                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Logic...</span>
                                 </div>
                                 <textarea
                                     autoFocus
                                     value={userNotes}
                                     onChange={(e) => setUserNotes(e.target.value)}
-                                    placeholder="Plan and structure your answer using key points or the STAR method...."
+                                    placeholder="Use this structured pause to align your actions with the company's core values and the meta-prompt logic..."
                                     className="flex-1 bg-transparent border-none text-xl outline-none resize-none font-medium text-slate-800 leading-relaxed custom-scrollbar"
                                 />
                                 <div className="flex justify-end pt-8 border-t shrink-0">
@@ -1209,7 +1436,7 @@ ${questionSummariesContent}
                                         onClick={() => { setIsWarmupActive(true); setWarmupTimeRemaining(5); }}
                                         className="px-12 py-5 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-600 transition-all hover:scale-105 active:scale-95"
                                     >
-                                        Resume to the main interview session
+                                        Resume Coherence Loop
                                     </button>
                                 </div>
                             </div>
@@ -1246,7 +1473,7 @@ ${questionSummariesContent}
                                 </div>
                                 <div id="ascend-phase-indicators" className="flex gap-1.5">
                                     {STAR_LABELS.map((_, i) => (
-                                        <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${isProbingActive ? 'w-10 bg-indigo-600 shadow-sm' : starPhase === i ? 'w-10 bg-indigo-600 shadow-sm' : i < starPhase ? 'w-10 bg-indigo-400 opacity-60' : 'w-2 bg-slate-200'}`} />
+                                        <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${starPhase === i ? 'w-10 bg-indigo-600 shadow-sm' : 'w-2 bg-slate-200'}`} />
                                     ))}
                                 </div>
                             </div>
@@ -1255,7 +1482,7 @@ ${questionSummariesContent}
                             <button
                                 id="ascend-deep-probe-button"
                                 onClick={triggerProbing}
-                                disabled={starPhase < 3 || isGeneratingProbe || transcript.length < 20}
+                                disabled={isGeneratingProbe || transcript.length < 20}
                                 className={`px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all border ${isProbingActive
                                     ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
                                     : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'
@@ -1264,23 +1491,22 @@ ${questionSummariesContent}
                                 <Brain size={16} className={isGeneratingProbe ? 'animate-pulse' : ''} />
                                 <span className="text-[10px] font-black uppercase tracking-widest">Deep Probe</span>
                             </button>
-                            <button onClick={handleStartBreak} className="p-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all flex items-center gap-2 group">
+                                <button id="btn-reflect" onClick={handleStartBreak} className="p-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all flex items-center gap-2 group">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover:block transition-all">Reflect</span>
                             </button>
                         </div>
                     </div>
-                    <h2 className="text-lg font-bold text-slate-900 leading-tight">{currentRequirement.text}</h2>
+                    <h2 id="ascend-question-prompt" className="text-lg font-bold text-slate-900 leading-tight">{currentRequirement.text}</h2>
                 </header>
 
-                <div className="flex-1 bg-white rounded-[40px] border border-slate-200 shadow-xl relative overflow-hidden flex items-center justify-center group">
+                <div id="ascend-platform-layout" className="flex-1 bg-white rounded-[40px] border border-slate-200 shadow-xl relative overflow-hidden flex items-center justify-center group">
                     <div id="ascend-timer-module" className="absolute top-6 left-6 z-40">
-                        <TimerWidget mode={timerDisplay} framing={timerFramingCondition} elapsedSeconds={sessionSeconds} isRecording={recordingStatus === 'recording'} isHidden={isTimerHidden} />
+                        <TimerWidget mode={timerDisplay} elapsedSeconds={sessionSeconds} isRecording={recordingStatus === 'recording'} isHidden={isTimerHidden} />
                     </div>
 
                     <div className="absolute top-6 right-6 z-40 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                            id="ascend-timer-toggle"
                             onClick={() => setIsTimerHidden(!isTimerHidden)}
                             className={`p-3 rounded-2xl backdrop-blur-md border shadow-lg transition-all ${isTimerHidden ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white/90 text-indigo-600 border-indigo-100'}`}
                             title="Toggle Timer"
@@ -1302,120 +1528,55 @@ ${questionSummariesContent}
                     </div>
 
                     {videoState === 'standard' && stream ? (
-                        <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover mirrored-video pointer-events-none" />
+                        <video id="ascend-video-feed" ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover mirrored-video pointer-events-none" />
                     ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center gap-8 bg-slate-50 text-center p-8">
                             <Waveform active={recordingStatus === 'recording'} scale={1.2} />
-                            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400">Video Hidden • Speak when ready</p>
+                            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400">Video Hidden ΓÇó Speak when ready</p>
                         </div>
                     )}
-
-                    <AnimatePresence>
-                        {isGeneratingProbe && (
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute inset-0 z-[100] bg-slate-900/90 backdrop-blur-xl flex flex-col items-center justify-center p-12 text-center"
-                            >
-                                <motion.div
-                                    initial={{ scale: 0.9, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className="relative mb-10"
-                                >
-                                    <div className="w-28 h-28 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <Brain className="text-white animate-pulse" size={44} />
-                                    </div>
-                                </motion.div>
-                                <motion.h3
-                                    initial={{ y: 20, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    transition={{ delay: 0.1 }}
-                                    className="text-2xl font-black text-white uppercase tracking-widest mb-6 max-w-lg leading-tight"
-                                >
-                                    Relax while the {probeLoadingType === 'question' ? 'probing question' : 'ANALYSIS'} is being prepared
-                                </motion.h3>
-                                <motion.div
-                                    initial={{ y: 20, opacity: 0 }}
-                                    animate={{ y: 0, opacity: 1 }}
-                                    transition={{ delay: 0.2 }}
-                                    className="space-y-4"
-                                >
-                                    <p className="text-sm font-bold text-indigo-300 uppercase tracking-[0.3em]">
-                                        You are doing well. Stay focused.
-                                    </p>
-                                    <div className="w-48 h-1 bg-white/10 rounded-full overflow-hidden mx-auto mt-6">
-                                        <motion.div
-                                            className="h-full bg-indigo-500"
-                                            animate={{ x: ["-100%", "100%"] }}
-                                            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                                        />
-                                    </div>
-                                </motion.div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
                 </div>
 
                 <footer className="flex flex-col items-center gap-4 py-4 shrink-0">
                     <div className="flex items-center gap-4">
-                        {!isProbingActive ? (
-                            <>
-                                <button
-                                    onClick={handlePrevQuestion}
-                                    disabled={currentQuestionIndex === 0}
-                                    className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-all"
-                                    title="Previous Question"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                                    </svg>
-                                </button>
-                                <button id="ascend-record-button" onClick={handleRecord} className={`px-12 py-4 rounded-2xl font-black text-lg transition-all shadow-xl hover:scale-105 active:scale-95 ${recordingStatus === 'recording' ? 'bg-rose-500 text-white shadow-rose-900/20' : 'bg-indigo-600 text-white shadow-indigo-900/20'}`}>
-                                    {recordingStatus === 'idle' ? `Speak: ${STAR_LABELS[starPhase]}` : 'Stop Speaking'}
-                                </button>
-                                <button id="ascend-next-step-button" onClick={handleNextPhase} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1">
-                                    {starPhase < 3 ? 'Next Step →' : 'Done'}
-                                </button>
-                                <button
-                                    id="ascend-next-question-button"
-                                    onClick={handleNextQuestion}
-                                    disabled={currentQuestionIndex === activeQuestions.length - 1}
-                                    className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-all"
-                                    title="Next Question"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                    </svg>
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button onClick={handleAnswerProbeClick}
-                                    disabled={isGeneratingProbe || nextQuestionCountdown > 0}
-                                    className={`px-12 py-4 rounded-2xl font-black text-lg transition-all shadow-xl hover:scale-105 active:scale-95 ${recordingStatus === 'recording' ? 'bg-rose-500 text-white shadow-rose-900/20' :
-                                        answerProbeCountdown > 0 ? 'bg-indigo-900 text-white scale-95 shadow-inner' : 'bg-indigo-600 text-white shadow-indigo-900/20'
-                                        }`}>
-                                    {recordingStatus === 'recording' ? 'Stop Speaking' :
-                                        answerProbeCountdown > 0 ? `Mic Opening... (${answerProbeCountdown})` : 'Answer Probe'}
-                                </button>
-                                <button
-                                    onClick={handleNextQuestion}
-                                    disabled={nextQuestionCountdown > 0 || answerProbeCountdown > 0}
-                                    className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                >
-                                    <span>
-                                        {probeAnalysis?.proceed === false
-                                            ? "More Detail Needed"
-                                            : currentQuestionIndex < activeQuestions.length - 1
-                                                ? (nextQuestionCountdown > 0 ? `Next Question (${nextQuestionCountdown})` : 'Next Question')
-                                                : (nextQuestionCountdown > 0 ? `Finish Session (${nextQuestionCountdown})` : 'Finish Session')
-                                        }
-                                    </span>
-                                </button>
-                            </>
-                        )}
+                        <button
+                            onClick={handlePrevQuestion}
+                            disabled={currentQuestionIndex === 0}
+                            className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-all"
+                            title="Previous Question"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                            </svg>
+                        </button>
+                        <button
+                            id="ascend-record-button"
+                            disabled={probeCountdown > 0}
+                            onClick={handleRecord}
+                            className={`px-12 py-4 rounded-2xl font-black text-lg transition-all shadow-xl hover:scale-105 active:scale-95 ${probeCountdown > 0 ? 'bg-slate-200 text-slate-400 cursor-not-allowed' :
+                                recordingStatus === 'recording' ? 'bg-rose-500 text-white shadow-rose-900/20' : 'bg-indigo-600 text-white shadow-indigo-900/20'
+                                }`}
+                        >
+                            {recordingStatus === 'idle' ? (
+                                isProbingActive ? (
+                                    micCountdown > 0 ? `Mic Opening in ${micCountdown}s...` :
+                                        decisionCountdown > 0 ? `Answer Probe (${decisionCountdown}s)` : 'Answer Probe'
+                                ) : `Speak: ${STAR_LABELS[starPhase]}`
+                            ) : 'Stop Speaking'}
+                        </button>
+                        <button id="ascend-next-step-button" onClick={handleNextPhase} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1">
+                            {starPhase < 3 ? 'Next Step ΓåÆ' : (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question ΓåÆ' : 'Finish Session')}
+                        </button>
+                        <button
+                            onClick={handleNextQuestion}
+                            disabled={currentQuestionIndex === activeQuestions.length - 1}
+                            className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-all"
+                            title="Next Question"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                            </svg>
+                        </button>
                     </div>
                 </footer>
             </main>
@@ -1424,7 +1585,7 @@ ${questionSummariesContent}
                 <div className="p-6 border-b bg-slate-50/50 flex items-center justify-between">
                     <div>
                         <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">
-                            {isProbingActive ? 'Probing Pipeline' : 'Practice Question'}
+                            {isProbingActive ? 'Probing Pipeline' : 'Coherence Auditor'}
                         </h3>
                         <p className="text-xs font-bold text-slate-900 leading-tight">
                             {isProbingActive ? 'Deep Domain Analysis' : `"${currentQuestion.text}"`}
@@ -1432,103 +1593,137 @@ ${questionSummariesContent}
                     </div>
                     {isProbingActive && (
                         <button
-                            onClick={handleNextQuestion}
-                            disabled={nextQuestionCountdown > 0 || answerProbeCountdown > 0}
-                            className="text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed tracking-widest px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-all"
-                            title="Move On to Next Question"
+                            onClick={() => {
+                                setIsProbingActive(false);
+                                setCurrentProbe(null);
+                                setProbeAnalysis(null);
+                            }}
+                            className="p-2 hover:bg-slate-200 rounded-lg transition-colors text-slate-400"
+                            title="Back to STAR"
                         >
-                            {nextQuestionCountdown > 0 ? `Move On (${nextQuestionCountdown})` : 'Move On'}
+                            <Brain size={16} />
                         </button>
                     )}
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="flex flex-col h-full">
-                        <div className="flex border-b bg-slate-50/30 p-1">
-                            {(['STAR', 'notes', 'transcript', 'analysis', 'summaries'] as ToolkitTab[]).map((tab) => (
+                        <div className="flex border-b bg-slate-50/30 p-1 flex-wrap gap-0.5">
+                            {(['plan', 'notes', 'transcript', 'insights', 'report'] as ToolkitTab[]).map((tab) => (
                                 <button
                                     key={tab}
+                                    id={`tab-${tab}`}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab
+                                    className={`flex-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-all relative ${activeTab === tab
                                         ? 'bg-white text-indigo-600 shadow-sm rounded-xl'
                                         : 'text-slate-400 hover:text-slate-600'
                                         }`}
                                 >
-                                    {tab === 'summaries' ? 'Reports' : tab === 'STAR' ? 'Plan' : tab}
+                                    {tab === 'insights' ? 'Insights' : tab}
+                                    {tab === 'report' && sessionLog.length > 0 && (
+                                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-600 text-white text-[8px] font-black rounded-full flex items-center justify-center">
+                                            {sessionLog.length}
+                                        </span>
+                                    )}
                                 </button>
                             ))}
                         </div>
 
                         <div className="flex-1 p-6">
-                            {activeTab === 'STAR' && (
+                            {activeTab === 'plan' && (
                                 <div id="ascend-toolkit-star" className="space-y-6 animate-fade-in">
-                                    {isProbingActive && currentProbe ? (
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 p-2 rounded-xl w-fit">
-                                                <AlertCircle size={14} className="animate-pulse" />
-                                                <span className="text-[10px] font-black uppercase tracking-widest">Follow-Up Probe Active | Probe {probeCount}</span>
-                                            </div>
-                                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">They asked</span>
-                                                <p className="text-sm font-bold text-slate-900">{currentProbe.probe}</p>
-                                            </div>
-                                            {currentProbe.contextual_anchor && (
-                                                <div className="bg-white p-3 rounded-xl border border-indigo-100 flex items-start gap-3">
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mt-0.5 shrink-0">They picked up on</span>
-                                                    <span className="text-xs font-bold text-indigo-900 italic">"{currentProbe.contextual_anchor}"</span>
-                                                </div>
-                                            )}
-                                            {probeCompletionMessage && (
-                                                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center justify-center text-center mt-4">
-                                                    <span className="text-xs font-bold text-emerald-800">{probeCompletionMessage}</span>
-                                                </div>
-                                            )}
-                                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 mt-4">
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Why this question</span>
-                                                <p className="text-xs font-medium text-slate-700 leading-relaxed">{currentProbe.rationale}</p>
-                                            </div>
-                                            {probeAnalysis && probeAnalysis.coaching_tip && (
-                                                <div className="bg-indigo-600 p-4 rounded-2xl border border-indigo-500 text-white mt-4 shadow-lg shadow-indigo-900/20 animate-fade-in">
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-200 mb-2 block">Personalized Coaching Tip</span>
-                                                    <p className="text-sm font-bold leading-relaxed">
-                                                        "{probeAnalysis.coaching_tip}"
-                                                    </p>
-                                                </div>
-                                            )}
-                                            {!probeAnalysis && currentProbe && (
-                                                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-white mt-4 shadow-lg">
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Preparation Guidance</span>
-                                                    <p className="text-sm font-bold leading-relaxed italic opacity-80">
-                                                        {currentProbe.probe_type === 'CLARIFYING' && "Prepare to give a specific, concrete example. Expand on exactly what you meant."}
-                                                        {currentProbe.probe_type === 'CONCRETE' && "Move from the general to the specific. Describe exactly what YOU personally did."}
-                                                        {currentProbe.probe_type === 'DEEPENING' && "Think about the 'Why' and the outcome. What was the thinking behind your decision?"}
-                                                        {currentProbe.probe_type === 'REDIRECTING' && "Focus back on your specific role. Avoid talking about the team or the situation for a moment."}
-                                                        {currentProbe.probe_type === 'STRATEGIC' && "Think about the bigger picture and systemic impact. How did this decision scale?"}
-                                                        {(!currentProbe.probe_type || currentProbe.probe_type === 'INSUFFICIENT_CONTEXT') && "Answer directly and specifically with a concrete example."}
-                                                    </p>
-                                                </div>
-                                            )}
-                                            <div className="mt-6 flex items-center justify-center gap-2 border-t pt-4">
-                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Current Phase:</span>
-                                                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded-md">{STAR_LABELS[starPhase]}</span>
+                                    {!isProbingActive ? (
+                                        <div className="border-b border-slate-100 pb-4">
+                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">STAR Strategy Checklist</h4>
+                                            <div className="space-y-3">
+                                                {currentQuestion.requirements.map((req, idx) => (
+                                                    <div key={req.id} className="flex items-start gap-3">
+                                                        <div className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black transition-all ${idx < starPhase ? 'bg-emerald-500 border-emerald-500 text-white' :
+                                                            idx === starPhase ? 'bg-white border-indigo-600 text-indigo-600 shadow-sm' :
+                                                                'bg-white border-slate-200 text-slate-300'
+                                                            }`}>
+                                                            {idx < starPhase ? '✓' : idx + 1}
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <p className={`text-[10px] font-black uppercase tracking-widest ${idx < starPhase ? 'text-emerald-600' :
+                                                                idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
+                                                                }`}>
+                                                                {STAR_LABELS[idx]}
+                                                            </p>
+                                                            <p className={`text-[11px] font-medium leading-tight mt-0.5 ${idx === starPhase ? 'text-slate-900' : 'text-slate-400'
+                                                                }`}>
+                                                                {req.text}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-4">
-                                            {currentQuestion.requirements.map((req, idx) => (
-                                                <div key={req.id} className={`flex gap-4 transition-all duration-300 ${idx < starPhase ? 'opacity-30' : idx === starPhase ? 'scale-105 translate-x-1' : 'opacity-60'}`}>
-                                                    <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center border-2 ${idx === starPhase ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white border-slate-200 text-slate-400'}`}>
-                                                        <span className="text-[10px] font-black">{STAR_LABELS[idx][0]}</span>
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <span className={`text-[9px] font-black uppercase tracking-widest ${idx === starPhase ? 'text-indigo-600' : 'text-slate-500'}`}>{STAR_LABELS[idx]}</span>
-                                                        <p className={`text-[11px] font-bold leading-tight mt-0.5 ${idx === starPhase ? 'text-slate-900' : 'text-slate-500'}`}>{req.text}</p>
-                                                    </div>
+                                        <div className="border-b border-slate-100 pb-4">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Target className="text-indigo-400" size={14} />
+                                                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Follow-up Session Active</h4>
+                                            </div>
+                                            <p className="text-[10px] font-medium text-slate-500 leading-relaxed italic">
+                                                The STAR checklist is hidden while we explore this specific domain probe. Respond to the probe to continue or move to the next question.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {currentQuestion.keywords && currentQuestion.keywords.length > 0 && (
+                                        <div>
+                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3">Key Vocabulary</h4>
+                                            <div className="flex flex-wrap gap-2">
+                                                {(currentQuestion?.keywords || []).map((kw, i) => (
+                                                    <span key={i} className="px-2 py-1 bg-slate-50 text-slate-600 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200">
+                                                        {kw}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 italic">
+                                        <p className="text-[10px] font-medium text-indigo-700 leading-relaxed">
+                                            Focus on proving your alignment with the <span className="font-black uppercase tracking-widest">Action</span> and <span className="font-black uppercase tracking-widest">Result</span> phases to maximize coherence signals.
+                                        </p>
+                                    </div>
+
+                                    {isGeneratingProbe && (
+                                        <div className="p-8 flex flex-col items-center justify-center text-center gap-4 bg-indigo-50/30 rounded-[32px] border-2 border-dashed border-indigo-100 animate-pulse">
+                                            <div className="w-12 h-12 border-4 border-indigo-50 border-t-indigo-600 rounded-full animate-spin" />
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">{reassuringMessage || "The next question is on its way. Be focused, Be ready"}</p>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">You are doing well. Stay focused, the follow-up question will be ready in a while. Till then relax!</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {currentProbe && !isGeneratingProbe && (
+                                        <div className="mt-6 p-6 bg-white border border-indigo-100 rounded-[32px] animate-fade-in shadow-md shadow-indigo-900/5 relative overflow-hidden group">
+                                            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                                                <Target size={80} />
+                                            </div>
+                                            <div className="flex items-center gap-2 mb-4">
+                                                <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
+                                                    <Sparkles size={12} />
                                                 </div>
-                                            ))}
+                                                <h4 className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Active Probe Analysis</h4>
+                                            </div>
+                                            <p className="text-sm font-black text-slate-900 leading-tight mb-4 relative z-10">
+                                                &ldquo;{currentProbe.probe}&rdquo;
+                                            </p>
+                                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                                <p className="text-[9px] font-medium text-slate-500 leading-relaxed">
+                                                    <span className="font-black uppercase text-slate-400 mr-2">Rationale:</span>
+                                                    {currentProbe.rationale}
+                                                </p>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
                             )}
+
 
                             {activeTab === 'notes' && (
                                 <div className="h-full flex flex-col animate-fade-in">
@@ -1544,7 +1739,7 @@ ${questionSummariesContent}
                             )}
 
                             {activeTab === 'transcript' && (
-                                <div id="ascend-transcript-area" className="h-full flex flex-col animate-fade-in">
+                                <div className="h-full flex flex-col animate-fade-in">
                                     <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Live Transcript</h4>
                                     <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-y-auto custom-scrollbar">
                                         <p className="text-[11px] font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
@@ -1560,160 +1755,189 @@ ${questionSummariesContent}
                                 </div>
                             )}
 
-                            {activeTab === 'analysis' && (
+                            {activeTab === 'insights' && (
                                 <div id="ascend-probing-pipeline" className="h-full flex flex-col animate-fade-in">
                                     <ProbingPipeline
-                                        currentProbe={probeRevealCountdown > 0 ? null : currentProbe}
+                                        currentProbe={currentProbe}
                                         analysis={probeAnalysis}
                                         isGenerating={isGeneratingProbe}
-                                        revealCountdown={probeRevealCountdown}
+                                        participantId={participantId}
+                                        revealCountdown={probeCountdown}
+                                        onSwitchTab={setActiveTab}
+                                        reassuringMessage={reassuringMessage}
                                     />
+                                    {probeCountdown > 0 && reassuringMessage && (
+                                        <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl animate-pulse">
+                                            <p className="text-[10px] font-bold text-indigo-700 text-center uppercase tracking-widest">
+                                                {reassuringMessage}
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            {activeTab === 'summaries' && (
-                                <div id="ascend-toolkit-reports" className="h-full flex flex-col animate-fade-in space-y-6">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Response Feedback </h4>
-                                        {isGeneratingSummary && (
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
-                                                <span className="text-[9px] font-black text-indigo-600 uppercase">Analysis in progress...</span>
-                                            </div>
-                                        )}
-                                    </div>
 
-                                    {questionSummaries.length === 0 ? (
-                                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-[32px] border border-dashed border-slate-200">
-                                            <Award size={48} className="text-slate-200 mb-4" />
-                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Completed summaries will appear here after each question</p>
+                            {activeTab === 'report' && (
+                                <div id="ascend-toolkit-reports" className="space-y-4 animate-fade-in">
+                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Session Record</h4>
+                                    {sessionLog.length === 0 ? (
+                                        <div className="flex flex-col items-center gap-4 py-12 opacity-30">
+                                            <div className="p-6 bg-slate-100 rounded-full">
+                                                <FileText size={32} className="text-slate-400" />
+                                            </div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 text-center">Complete a question to see your session record</p>
                                         </div>
                                     ) : (
-                                        <div className="space-y-6 overflow-y-auto custom-scrollbar pr-2 pb-8">
-                                            {questionSummaries.map((summary, idx) => (
-                                                <div key={idx} className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-all group">
-                                                    <div className="bg-slate-900 p-6 text-white flex items-center justify-between">
-                                                        <div>
-                                                            <div className="flex items-center gap-2 mb-1">
-                                                                <Award size={14} className="text-indigo-400" />
-                                                                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300">Question {idx + 1} Report</span>
-                                                            </div>
-                                                            <h5 className="text-sm font-black leading-tight line-clamp-1">{summary.questionText}</h5>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => window.print()}
-                                                            className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-colors group-hover:scale-110 active:scale-95"
-                                                            title="Download PDF"
-                                                        >
-                                                            <Download size={18} />
-                                                        </button>
+                                        sessionLog.map((entry, idx) => (
+                                            <div key={idx} className="bg-white border border-slate-200 rounded-[24px] p-5 space-y-4 shadow-sm">
+
+                                                {/* Header: Q# + STAR dots */}
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex-1">
+                                                        <span className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Q{entry.questionIndex + 1} · {CATEGORIES[entry.questionIndex] || 'General'}</span>
+                                                        <p className="text-[11px] font-bold text-slate-800 mt-1 leading-tight line-clamp-2">&ldquo;{entry.questionText}&rdquo;</p>
                                                     </div>
+                                                    <div className="flex gap-1 shrink-0">
+                                                        {['S', 'T', 'A', 'R'].map((s, i) => (
+                                                            <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black ${i <= entry.starPhaseReached ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'
+                                                                }`}>{s}</div>
+                                                        ))}
+                                                    </div>
+                                                </div>
 
-                                                    <div className="p-6 space-y-6">
-                                                        {/* Section 1: Answer Overview */}
-                                                        <div className="space-y-2">
-                                                            <h6 className="text-[9px] font-black uppercase tracking-widest text-indigo-600">Your Answer Overview</h6>
-                                                            <p className="text-xs font-bold text-slate-900 leading-relaxed">{summary.answerOverview}</p>
+                                                {/* Rich Summary Report */}
+                                                {entry.summaryReport ? (
+                                                    <div className="space-y-3">
+                                                        {/* Section 1: Overview */}
+                                                        <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Answer Overview</p>
+                                                            <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{entry.summaryReport.answerOverview}</p>
                                                         </div>
 
-                                                        {/* Section 2: What You Did Well */}
-                                                        <div className="space-y-3">
-                                                            <h6 className="text-[9px] font-black uppercase tracking-widest text-emerald-600">What You Did Well</h6>
-                                                            <div className="space-y-2">
-                                                                {summary.strengths.map((s, i) => (
-                                                                    <div key={i} className="flex gap-3 items-start p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
-                                                                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 shrink-0" />
-                                                                        <p className="text-[11px] font-bold text-emerald-900">{s}</p>
-                                                                    </div>
-                                                                ))}
+                                                        {/* Section 2: Strengths */}
+                                                        {entry.summaryReport.strengths.length > 0 && (
+                                                            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2">What You Did Well</p>
+                                                                <ul className="space-y-1">
+                                                                    {(entry.summaryReport.strengths || []).map((s, i) => (
+                                                                        <li key={i} className="flex gap-2 items-start">
+                                                                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1 shrink-0" />
+                                                                            <p className="text-[10px] font-medium text-emerald-800 leading-snug">{s}</p>
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
                                                             </div>
-                                                        </div>
+                                                        )}
 
-                                                        {/* Section 3: Where To Go Deeper */}
-                                                        <div className="space-y-3">
-                                                            <h6 className="text-[9px] font-black uppercase tracking-widest text-amber-600">Where To Go Deeper</h6>
-                                                            <div className="space-y-4">
-                                                                {summary.developmentPoints.map((d, i) => (
-                                                                    <div key={i} className="space-y-2 p-4 bg-amber-50 rounded-2xl border border-amber-100">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <AlertCircle size={14} className="text-amber-500" />
-                                                                            <span className="text-[10px] font-black text-amber-900 uppercase tracking-tight">{d.gap}</span>
-                                                                        </div>
-                                                                        <p className="text-[11px] font-medium text-amber-800 leading-relaxed italic">"{d.whyItMatters}"</p>
-                                                                        <div className="mt-2 pt-2 border-t border-amber-200/50">
-                                                                            <p className="text-xs font-black text-amber-950 uppercase tracking-tighter">Instruction:</p>
-                                                                            <p className="text-[11px] font-bold text-amber-900">{d.instruction}</p>
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Section 4: Probing Insight Analysis */}
-                                                        <div className="space-y-4 border-t pt-6 border-slate-100">
-                                                            <h6 className="text-[9px] font-black uppercase tracking-widest text-slate-400">Probing Deep-Dive Audit</h6>
-                                                            <p className="text-[11px] font-medium text-slate-600 leading-relaxed mb-4">{summary.probeEngagement}</p>
-
-                                                            {summary.allProbeAnalyses && summary.allProbeAnalyses.length > 0 && (
-                                                                <div className="space-y-4">
-                                                                    {summary.allProbeAnalyses.map((analysis, pIdx) => (
-                                                                        <div key={pIdx} className="p-5 bg-slate-50/50 rounded-[24px] border border-slate-200">
-                                                                            <div className="flex items-center justify-between mb-4">
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <div className="p-1 bg-indigo-600 text-white rounded-lg">
-                                                                                        <Sparkles size={12} />
-                                                                                    </div>
-                                                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-900">Probe {pIdx + 1} Insights</span>
-                                                                                </div>
-                                                                                <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${analysis.probe_successful ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                                                                    }`}>
-                                                                                    {analysis.probe_successful ? 'Success' : 'Incomplete'}
-                                                                                </span>
-                                                                            </div>
-
-                                                                            <div className="space-y-3">
-                                                                                {analysis.verbatimProbe && (
-                                                                                    <div className="mb-4 pb-4 border-b border-slate-200/50">
-                                                                                        <p className="text-[8px] font-black uppercase tracking-widest text-indigo-400 mb-1">Question Asked</p>
-                                                                                        <p className="text-sm font-black text-slate-900 leading-tight italic">"{analysis.verbatimProbe}"</p>
-                                                                                    </div>
-                                                                                )}
-                                                                                <div>
-                                                                                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-1">Interpretation</p>
-                                                                                    <p className="text-[11px] font-bold text-slate-900 leading-tight">
-                                                                                        {analysis.interpretation}
-                                                                                    </p>
-                                                                                </div>
-                                                                                {analysis.pj_observations && analysis.pj_observations.length > 0 && (
-                                                                                    <div>
-                                                                                        <p className="text-[8px] font-black uppercase tracking-widest text-indigo-400 mb-1">Qualitative Observations</p>
-                                                                                        <div className="space-y-1">
-                                                                                            {analysis.pj_observations.map((obs, oIdx) => (
-                                                                                                <p key={oIdx} className="text-[10px] font-medium text-slate-600 flex gap-2">
-                                                                                                    <span className="text-indigo-400">•</span> {obs}
-                                                                                                </p>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
+                                                        {/* Section 3: Development Points */}
+                                                        {entry.summaryReport.developmentPoints.length > 0 && (
+                                                            <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-2">Where to Go Deeper</p>
+                                                                <div className="space-y-2">
+                                                                    {(entry.summaryReport.developmentPoints || []).map((dp, i) => (
+                                                                        <div key={i} className="p-2 bg-white/60 rounded-xl border border-amber-100">
+                                                                            <p className="text-[10px] font-black text-amber-800">{dp.gap}</p>
+                                                                            <p className="text-[9px] font-medium text-amber-600 mt-0.5 italic">{dp.whyItMatters}</p>
+                                                                            <p className="text-[10px] font-bold text-slate-700 mt-1">&rarr; {dp.instruction}</p>
                                                                         </div>
                                                                     ))}
                                                                 </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Section 4: Probe Engagement */}
+                                                        {entry.summaryReport.probeEngagement && (
+                                                            <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Probe Engagement</p>
+                                                                <p className="text-[10px] font-medium text-indigo-800 leading-relaxed">{entry.summaryReport.probeEngagement}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Section 5: Probe Correlation */}
+                                                        {entry.summaryReport.probeCorrelation && (
+                                                            <div className="p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100 border-dashed">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <Layers size={10} className="text-indigo-400" />
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Act-Probe Correlation</p>
+                                                                </div>
+                                                                <p className="text-[10px] font-medium text-indigo-800/80 leading-relaxed">{entry.summaryReport.probeCorrelation}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Section 6: Integrated Coaching */}
+                                                        {entry.summaryReport.integratedCoaching && (
+                                                            <div className="p-3 bg-indigo-600 rounded-2xl border border-indigo-700 shadow-lg shadow-indigo-900/10">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <Sparkles size={10} className="text-indigo-200" />
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-100">Integrated Excellence Guidance</p>
+                                                                </div>
+                                                                <p className="text-[10px] font-bold text-white leading-relaxed">{entry.summaryReport.integratedCoaching}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Section 5: Practice Task */}
+                                                        {entry.summaryReport.practiceTask && (
+                                                            <div className="p-3 bg-slate-900 rounded-2xl">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-1">One Thing to Practise</p>
+                                                                <p className="text-[11px] font-bold text-white leading-snug">{entry.summaryReport.practiceTask}</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : entry.probeAnalysis ? (
+                                                    /* Fallback: pill summary while report generates */
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center gap-2 text-indigo-500 animate-pulse">
+                                                            <Sparkles size={12} />
+                                                            <span className="text-[9px] font-black uppercase tracking-widest">Generating detailed analysis...</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.probeAnalysis.depth_delta === 'increased' ? 'bg-emerald-100 text-emerald-700' :
+                                                                entry.probeAnalysis.depth_delta === 'decreased' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-600'
+                                                                }`}>Depth: {entry.probeAnalysis.depth_delta}</span>
+                                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.probeAnalysis.proceed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                                                }`}>{entry.probeAnalysis.proceed ? 'Proceed ✓' : 'Hold & Probe'}</span>
+                                                            {entry.probeAnalysis.coaching_tip && (
+                                                                <p className="w-full text-[10px] font-medium text-slate-600 italic mt-1">{entry.probeAnalysis.coaching_tip}</p>
                                                             )}
                                                         </div>
-
-                                                        {/* Section 5: One Thing To Practise */}
-                                                        <div className="p-5 bg-indigo-600 rounded-[24px] text-white shadow-lg shadow-indigo-900/20">
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                <Award size={14} className="text-indigo-200" />
-                                                                <h6 className="text-[9px] font-black uppercase tracking-widest text-indigo-100">One Thing To Practise</h6>
-                                                            </div>
-                                                            <p className="text-xs font-bold leading-relaxed">{summary.practiceTask}</p>
-                                                        </div>
                                                     </div>
+                                                ) : (
+                                                    <p className="text-[10px] text-slate-400 font-medium italic">No probe was triggered for this question.</p>
+                                                )}
+
+                                                {/* Probe Card */}
+                                                {entry.probe && (
+                                                    <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
+                                                        <span className="text-[8px] font-black uppercase tracking-widest text-indigo-400">Probe · {entry.probe.probe_type.replace(/_/g, ' ')}</span>
+                                                        <p className="text-[11px] font-bold text-indigo-900 mt-1 leading-tight">&ldquo;{entry.probe.probe}&rdquo;</p>
+                                                    </div>
+                                                )}
+
+                                                {/* Download and Modal Actions */}
+                                                <div className="flex gap-2">
+                                                    {entry.summaryReport && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDownloadQuestionReport(entry);
+                                                            }}
+                                                            className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                                                        >
+                                                            <Download size={12} />
+                                                            Download Analysis
+                                                        </button>
+                                                    )}
+                                                    {entry.probe && entry.probeAnalysis && (
+                                                        <button
+                                                            onClick={() => setReportModalEntry(entry)}
+                                                            className="flex-1 py-2 bg-slate-900 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-2"
+                                                        >
+                                                            <Sparkles size={12} />
+                                                            View Insights
+                                                        </button>
+                                                    )}
                                                 </div>
-                                            ))}
-                                        </div>
+                                            </div>
+                                        ))
                                     )}
                                 </div>
                             )}
@@ -1726,166 +1950,36 @@ ${questionSummariesContent}
                 .custom-scrollbar::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:10px}
                 @media print {
                     .no-print { display: none !important; }
-                    body * { visibility: hidden; }
-                    .printable-report, .printable-report * { visibility: visible; }
-                    .printable-report { 
-                        position: absolute; 
-                        left: 0; 
-                        top: 0; 
-                        width: 100%;
-                        visibility: visible !important;
-                    }
                     body { background: white !important; }
+                    .min-h-screen { min-height: auto !important; height: auto !important; overflow: visible !important; }
+                    .max-w-7xl { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
                     .shadow-sm, .shadow-xl, .shadow-2xl { shadow: none !important; box-shadow: none !important; }
+                    .rounded-[40px], .rounded-3xl, .rounded-2xl { border-radius: 8px !important; }
+                    button { display: none !important; }
+                    .bg-slate-50, .bg-slate-100 { background: white !important; }
+                    .border { border: 1px solid #e2e8f0 !important; }
+                    .text-indigo-600 { color: #4f46e5 !important; }
+                    .bg-slate-900 { background: #0f172a !important; color: white !important; }
+                    .p-8 { padding: 1.5rem !important; }
+                    .gap-8 { gap: 1rem !important; }
+                    .grid { display: block !important; }
+                    .grid > * { margin-bottom: 1.5rem !important; page-break-inside: avoid; }
+                    section { page-break-inside: avoid; margin-bottom: 2rem !important; }
+                    h1 { font-size: 2.5rem !important; }
                 }
             `}</style>
 
-            {/* Hidden Printable Container for Professional PDF Reports */}
-            <div className="hidden printable-report print:block p-12 bg-white min-h-screen">
-                {questionSummaries.length > 0 && (
-                    <div className="max-w-[800px] mx-auto space-y-12">
-                        <div className="border-b-4 border-slate-900 pb-8">
-                            <h1 className="text-4xl font-black mb-2 uppercase tracking-tight">Response Summary Report</h1>
-                            <div className="flex justify-between items-end">
-                                <div>
-                                    <p className="text-xs font-black text-indigo-600 uppercase tracking-widest">Ascend Coherence Auditor</p>
-                                    <p className="text-xl font-bold mt-2">Candidate Analysis: {participantId || "Anonymous"}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-sm font-bold">{new Date().toLocaleDateString()}</p>
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">STAR Analysis Report</p>
-                                </div>
-                            </div>
-                        </div>
-                        {questionSummaries.map((summary, idx) => (
-                            <div key={idx} className="space-y-8 page-break-after-always">
-                                <div className="p-6 bg-slate-900 text-white rounded-2xl">
-                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">Question {idx + 1}</span>
-                                    <h2 className="text-2xl font-black mt-2 leading-tight">{summary.questionText}</h2>
-                                </div>
-
-                                <section className="space-y-3">
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b border-indigo-100 pb-2">1. Your Answer Overview</h3>
-                                    <p className="text-sm font-medium leading-relaxed text-slate-800">{summary.answerOverview}</p>
-                                </section>
-
-                                <section className="space-y-4">
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-emerald-600 border-b border-emerald-100 pb-2">2. What You Did Well</h3>
-                                    <div className="space-y-3">
-                                        {summary.strengths.map((s, i) => (
-                                            <div key={i} className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex gap-3">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
-                                                <p className="text-sm font-bold text-emerald-900">{s}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </section>
-
-                                <section className="space-y-4">
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-amber-600 border-b border-amber-100 pb-2">3. Where To Go Deeper</h3>
-                                    <div className="space-y-4">
-                                        {summary.developmentPoints.map((d, i) => (
-                                            <div key={i} className="p-5 bg-amber-50 rounded-xl border border-amber-100 space-y-2">
-                                                <h4 className="text-xs font-black text-amber-900 uppercase">{d.gap}</h4>
-                                                <p className="text-sm font-medium text-amber-800 italic">"{d.whyItMatters}"</p>
-                                                <div className="mt-4 pt-4 border-t border-amber-200">
-                                                    <p className="text-[10px] font-black text-amber-950 uppercase mb-1">Instruction</p>
-                                                    <p className="text-sm font-bold text-amber-900">{d.instruction}</p>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </section>
-
-                                <section className="space-y-6">
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 border-b border-slate-100 pb-2">4. Probing Deep-Dive Audit</h3>
-                                    <p className="text-sm font-medium leading-relaxed text-slate-700 mb-8">{summary.probeEngagement}</p>
-
-                                    {summary.allProbeAnalyses && summary.allProbeAnalyses.length > 0 && (
-                                        <div className="space-y-8 mt-12">
-                                            {summary.allProbeAnalyses.map((analysis, pIdx) => (
-                                                <div key={pIdx} className="p-8 bg-slate-900 text-white rounded-[40px] relative overflow-hidden">
-                                                    <div className="absolute top-0 right-0 p-8 opacity-10">
-                                                        <Brain size={120} />
-                                                    </div>
-                                                    <div className="relative z-10 space-y-6">
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <Sparkles size={18} className="text-indigo-400" />
-                                                                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-indigo-400">Probe {pIdx + 1} Analysis</h4>
-                                                            </div>
-                                                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${analysis.probe_successful ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                                                }`}>
-                                                                {analysis.probe_successful ? 'Structural Success' : 'Anchoring Required'}
-                                                            </span>
-                                                        </div>
-                                                        {analysis.verbatimProbe && (
-                                                            <div className="mb-6 pb-6 border-b border-white/10">
-                                                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-2">Question Asked</p>
-                                                                <p className="text-xl font-bold text-white leading-tight italic">"{analysis.verbatimProbe}"</p>
-                                                            </div>
-                                                        )}
-
-                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Interpretation</p>
-                                                        <p className="text-2xl font-black leading-tight tracking-tight">
-                                                            {analysis.interpretation}
-                                                        </p>
-
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-white/10">
-                                                            <div>
-                                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Narrative Progression</p>
-                                                                <div className="flex gap-2">
-                                                                    {Object.entries(analysis.star_status).map(([comp, status]) => (
-                                                                        <div key={comp} className={`w-10 h-10 rounded-xl flex items-center justify-center text-[11px] font-black uppercase ${status === 'complete' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                                                                            status === 'partial' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                                                                                'opacity-20 bg-white/5 border border-white/10'
-                                                                            }`}>
-                                                                            {comp[0]}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                            {analysis.pj_observations && analysis.pj_observations.length > 0 && (
-                                                                <div>
-                                                                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-3">Qualitative Findings</p>
-                                                                    <div className="space-y-2">
-                                                                        {analysis.pj_observations.map((obs, oIdx) => (
-                                                                            <div key={oIdx} className="flex gap-3 items-start">
-                                                                                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full mt-1.5 shrink-0" />
-                                                                                <p className="text-xs font-medium text-slate-300 italic leading-relaxed">"{obs}"</p>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-
-                                                        <div className="pt-4 flex items-center gap-4">
-                                                            <div className="px-4 py-2 bg-white/5 rounded-2xl border border-white/10">
-                                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 mr-2">System Action:</span>
-                                                                <span className="text-[10px] font-bold text-white">{analysis.reason}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </section>
-
-                                <section className="p-6 bg-indigo-50 border-2 border-indigo-200 rounded-[32px] space-y-3">
-                                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-700">5. One Thing To Practise</h3>
-                                    <p className="text-lg font-black text-indigo-900 leading-tight">{summary.practiceTask}</p>
-                                </section>
-                            </div>
-                        ))}
-
-                        <div className="pt-12 border-t border-slate-200 text-center">
-                            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Generated by AscendX Professional Feedback Engine</p>
-                        </div>
-                    </div>
+            {/* Session Log — Full Probing Report Modal */}
+            <AnimatePresence>
+                {reportModalEntry && reportModalEntry.probe && reportModalEntry.probeAnalysis && (
+                    <ProbingReport
+                        probe={reportModalEntry.probe}
+                        analysis={reportModalEntry.probeAnalysis}
+                        onClose={() => setReportModalEntry(null)}
+                        participantId={participantId}
+                    />
                 )}
-            </div>
+            </AnimatePresence>
         </div>
     );
 };

@@ -41,7 +41,7 @@ const HelpIcon = ({ onClick }: { onClick: (event: React.MouseEvent) => void }) =
 
 const RadioOption = ({ id, name, value, label, checked, onChange, description, onMouseEnter, onMouseLeave }: { id?: string, name: string, value: string, label: string, checked: boolean, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, description: string, onMouseEnter?: React.MouseEventHandler, onMouseLeave?: React.MouseEventHandler }) => (
     <label id={id} className="flex items-start p-4 border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
-        <input type="radio" name="timer" value={value} checked={checked} onChange={onChange} className="mt-1 mr-4 accent-blue-600" />
+        <input type="radio" name={name} value={value} checked={checked} onChange={onChange} className="mt-1 mr-4 accent-blue-600" />
         <div>
             <span className="font-semibold text-slate-800">{label}</span>
             <p className="text-sm text-slate-600">{description}</p>
@@ -83,6 +83,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         setCvText,
         timerFramingCondition,
         setTimerFramingCondition,
+        companyName,
+        setCompanyName,
+        targetRole,
+        setTargetRole,
+        jobDescription,
+        setJobDescription,
         isTourActive
     } = useSettings();
 
@@ -96,10 +102,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
     const [helpPosition, setHelpPosition] = useState({ top: 0, left: 0 });
     const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
 
-    const [jobDescription, setJobDescription] = useState('');
-    const [companyName, setCompanyName] = useState('');
+    // Local state for non-persisted UI elements
     const [companyLink, setCompanyLink] = useState('');
-    const [targetRole, setTargetRole] = useState('');
     const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
     const [isExtractingPdf, setIsExtractingPdf] = useState(false);
 
@@ -412,6 +416,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                 </p>
                                                 <div className="grid grid-cols-1 gap-4">
                                                     <RadioOption
+                                                        id="timer-progress"
                                                         name="timerFraming"
                                                         value="elapsed"
                                                         label="🕐 Time Elapsed"
@@ -421,6 +426,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                         onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
                                                     />
                                                     <RadioOption
+                                                        id="timer-countdown"
                                                         name="timerFraming"
                                                         value="duration"
                                                         label="⏱ Response Duration"
@@ -430,6 +436,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                         onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
                                                     />
                                                     <RadioOption
+                                                        id="timer-traffic"
                                                         name="timerFraming"
                                                         value="used"
                                                         label="⏳ Time Used"

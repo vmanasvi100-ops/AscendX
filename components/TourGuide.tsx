@@ -66,13 +66,15 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
 
     useLayoutEffect(() => {
         let retryCount = 0;
-        const maxRetries = 20; // Try for ~3 seconds
+        const maxRetries = 30; // Try for ~4.5 seconds to allow React state transitions
         let timeoutId: NodeJS.Timeout;
 
         const findAndPosition = () => {
+            // Restore styles on previous target
             if (prevTargetRef.current && prevTargetStyleRef.current) {
                 prevTargetRef.current.style.zIndex = prevTargetStyleRef.current.zIndex;
                 prevTargetRef.current.style.position = prevTargetStyleRef.current.position;
+                prevTargetRef.current = null;
             }
 
             const targetElement = document.getElementById(step.targetId);
@@ -107,20 +109,27 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
                         height: rect.height + padding * 2,
                         opacity: 1
                     });
-                    
+
                     setPopoverStyle({
                         top: popoverPos.top,
                         left: popoverPos.left,
                         opacity: 1,
                         transform: 'translateY(0px)',
                     });
-                }, 150); 
+                }, 150);
             } else if (retryCount < maxRetries) {
                 retryCount++;
                 timeoutId = setTimeout(findAndPosition, 150);
             } else {
+                // Fallback: element not found — hide highlight but keep popover centered on screen
+                // so the tour doesn't silently break during screen transitions
                 setHighlightStyle({ opacity: 0 });
-                setPopoverStyle({ opacity: 0, transform: 'translateY(10px)' });
+                setPopoverStyle({
+                    top: Math.max(16, window.innerHeight / 2 - 90),
+                    left: Math.max(16, window.innerWidth / 2 - 160),
+                    opacity: 1,
+                    transform: 'translateY(0px)',
+                });
             }
         };
 

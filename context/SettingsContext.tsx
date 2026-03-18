@@ -11,7 +11,6 @@ interface SettingsContextType extends Settings {
   setVisualFeedback: (visualFeedback: VisualFeedbackStyle) => void;
   setAudioCues: (enabled: boolean) => void;
   setGamification: (enabled: boolean) => void;
-  setCoachMarkTheme: (theme: CoachMarkTheme) => void;
   setReadAloud: (enabled: boolean) => void;
   setSpeechRate: (speechRate: SpeechRate) => void;
   setVideoEnabled: (enabled: boolean) => void;
@@ -21,6 +20,12 @@ interface SettingsContextType extends Settings {
   setActiveQuestions: (questions: Question[]) => void;
   timerFramingCondition: TimerFramingCondition;
   setTimerFramingCondition: (condition: TimerFramingCondition) => void;
+  companyName: string;
+  setCompanyName: (name: string) => void;
+  targetRole: string;
+  setTargetRole: (role: string) => void;
+  jobDescription: string;
+  setJobDescription: (description: string) => void;
   
   // Persistence for Return Navigation
   persistedAuditResult: AuditResult | null;
@@ -34,6 +39,8 @@ interface SettingsContextType extends Settings {
   nextTourStep: () => void;
   jumpToTourStep: (stepIndex: number) => void;
   endTour: (options?: { restore?: boolean }) => void;
+  finishSessionTrigger: boolean;
+  setFinishSessionTrigger: (trigger: boolean) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -81,12 +88,14 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [visualFeedback, setVisualFeedback] = useState<VisualFeedbackStyle>('gentle');
   const [audioCues, setAudioCues] = useState(false);
   const [gamification, setGamification] = useState(condition !== 'minimal');
-  const [coachMarkTheme, setCoachMarkTheme] = useState<CoachMarkTheme>('default');
   const [readAloud, setReadAloud] = useState(true);
   const [speechRate, setSpeechRate] = useState<SpeechRate>(1);
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [cvText, setCvText] = useState("");
   const [timerFramingCondition, setTimerFramingCondition] = useState<TimerFramingCondition>('elapsed');
+  const [companyName, setCompanyName] = useState("");
+  const [targetRole, setTargetRole] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
 
   // Return Persistence
   const [persistedAuditResult, setPersistedAuditResult] = useState<AuditResult | null>(null);
@@ -95,17 +104,17 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [activeQuestions, setActiveQuestions] = useState<Question[]>(() => shuffleArray(interviewQuestions));
   const [isTourActive, setIsTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
+  const [finishSessionTrigger, setFinishSessionTrigger] = useState(false);
   const [originalSettings, setOriginalSettings] = useState<TourResettableSettings | null>(null);
 
   const startTour = () => {
-    setOriginalSettings({ timerDisplay, liveTools, dyslexiaFont, visualFeedback, audioCues, gamification, coachMarkTheme, videoEnabled });
+    setOriginalSettings({ timerDisplay, liveTools, dyslexiaFont, visualFeedback, audioCues, gamification, videoEnabled });
     setTimerDisplay('progressBar');
     setLiveTools({ keywordPathfinder: false, fillerWordCounter: false, questionChecklist: false });
     setDyslexiaFont(false);
     setVisualFeedback('gentle');
     setAudioCues(false);
     setGamification(false);
-    setCoachMarkTheme('default');
     setVideoEnabled(false);
     setTourStep(0);
     setIsTourActive(true);
@@ -128,7 +137,6 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       setVisualFeedback(originalSettings.visualFeedback);
       setAudioCues(originalSettings.audioCues);
       setGamification(originalSettings.gamification);
-      setCoachMarkTheme(originalSettings.coachMarkTheme);
       setVideoEnabled(originalSettings.videoEnabled);
     }
     setOriginalSettings(null);
@@ -139,11 +147,13 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const value = {
     participantId, setParticipantId, condition, timerDisplay, setTimerDisplay, liveTools, setLiveTools,
     dyslexiaFont, setDyslexiaFont, visualFeedback, setVisualFeedback, audioCues, setAudioCues,
-    gamification, setGamification, coachMarkTheme, setCoachMarkTheme, readAloud, setReadAloud,
+    gamification, setGamification, readAloud, setReadAloud,
     speechRate, setSpeechRate, videoEnabled, setVideoEnabled, cvText, setCvText, activeQuestions, setActiveQuestions,
     timerFramingCondition, setTimerFramingCondition,
+    companyName, setCompanyName, targetRole, setTargetRole, jobDescription, setJobDescription,
     persistedAuditResult, setPersistedAuditResult, isPredictiveActive, setIsPredictiveActive,
     isTourActive, tourStep, startTour, nextTourStep, jumpToTourStep, endTour,
+    finishSessionTrigger, setFinishSessionTrigger,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

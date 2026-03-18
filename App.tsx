@@ -108,7 +108,8 @@ const AppContent: React.FC = () => {
     setVideoEnabled,
     participantId,
     condition,
-    setIsPredictiveActive // Need this to reset home view
+    setIsPredictiveActive, // Need this to reset home view
+    setFinishSessionTrigger
   } = useSettings();
   const [appState, setAppState] = useState<AppState>('welcome');
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
@@ -211,6 +212,9 @@ const AppContent: React.FC = () => {
     const currentStep = tourSteps[tourStep];
     if (currentStep.action === 'START_INTERVIEW') {
       startInterview();
+    } else if (currentStep.action === 'FINISH_SESSION') {
+      setFinishSessionTrigger(true);
+      nextTourStep();
     } else if (tourStep === tourSteps.length - 1) {
       // Tour finished! Return to welcome screen for fresh start/configuration
       endTour();
@@ -255,7 +259,7 @@ const AppContent: React.FC = () => {
           currentStepIndex={tourStep}
           totalSteps={tourSteps.length}
           onNext={handleNextStep}
-          onSkipSection={() => endTour()}
+          onSkipSection={nextTourStep}
           onExit={() => endTour()}
         />
       )}
