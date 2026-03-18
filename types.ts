@@ -162,6 +162,7 @@ export interface Settings {
   participantId: string;
   condition: ExperimentCondition;
   cvText?: string;
+  coachMarkTheme: CoachMarkTheme;
 }
 
 // Fix: Added TourResettableSettings interface
@@ -201,19 +202,20 @@ export interface MeritVectors {
   primarySuggestionAnchor: string;
 }
 
-export interface ProceduralJusticeDimension {
+export interface ProfessionalSelfVerificationSignalDimension {
   score: number;
+  orientation: 'self_verifying' | 'impression_managing' | 'balanced';
   evidenceBasis: string;
 }
 
-export interface ProceduralJusticeDimensions {
-  voice: ProceduralJusticeDimension;
-  validation: ProceduralJusticeDimension;
-  respect: ProceduralJusticeDimension;
-  neutrality: ProceduralJusticeDimension;
-  motivation: ProceduralJusticeDimension;
-  explanation: ProceduralJusticeDimension;
-  overallPJNote: string;
+export interface ProfessionalSelfVerificationSignals {
+  voice: ProfessionalSelfVerificationSignalDimension;
+  motivation: ProfessionalSelfVerificationSignalDimension;
+  explanation: ProfessionalSelfVerificationSignalDimension;
+  dominantMode: 'self_verifying' | 'impression_managing' | 'mixed';
+  fitSignal: string;
+  feedbackImplication: string;
+  researchNote: string;
 }
 
 export interface ImpressionManagementScore {
@@ -278,7 +280,7 @@ export interface ScaffoldedLearningSignal {
 // ─── COMPLETE LayerBSignals interface ────────────────────────────────
 export interface LayerBSignals {
   meritVectors: MeritVectors;
-  proceduralJusticeDimensions: ProceduralJusticeDimensions;
+  professionalSelfVerificationSignals: ProfessionalSelfVerificationSignals;
   impressionManagementScore: ImpressionManagementScore;
   algorithmicAversionSignal: AlgorithmicAversionSignal;
   socialIdentityAwareness: SocialIdentityAwareness;
@@ -344,14 +346,14 @@ export interface DetailedFeedback {
     lowestVector: 'autonomy' | 'competence' | 'relatedness';
     primarySuggestionAnchor: string;
   };
-  proceduralJusticeDimensions?: {
-    voice: { score: number; evidenceBasis: string };
-    validation: { score: number; evidenceBasis: string };
-    respect: { score: number; evidenceBasis: string };
-    neutrality: { score: number; evidenceBasis: string };
-    motivation: { score: number; evidenceBasis: string };
-    explanation: { score: number; evidenceBasis: string };
-    overallPJNote: string;
+  professionalSelfVerificationSignals?: {
+    voice: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
+    motivation: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
+    explanation: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
+    dominantMode: 'self_verifying' | 'impression_managing' | 'mixed';
+    fitSignal: string;
+    feedbackImplication: string;
+    researchNote: string;
   };
   impressionManagementScore?: {
     frontStageScore: number;

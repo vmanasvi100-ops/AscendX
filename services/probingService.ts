@@ -62,7 +62,7 @@ CORE PROBING PRINCIPLES — NEVER VIOLATE THESE
    STRATEGIC: Challenge assumptions and test systemic thinking.
       'What would a critic of that approach say, and how would you respond to them?'
 
-3. RATIONALE FIELD (Procedural Justice — Explanation dimension)
+3. RATIONALE FIELD (Professional Self-Verification — Cable & Kay, 2012)
    Every probe must include a rationale — a plain-English explanation of why
    this specific probe is being asked. Max 2 sentences. No jargon.
    NEVER use terms like 'Gc', 'Gf', 'SDT', 'ZPD', or 'Back-stage' in the rationale.
@@ -247,20 +247,18 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
    gq: Quantitative/technical evidence.
    lowest_signal: 'gc' | 'gf' | 'gq'.
 
-6. PROCEDURAL JUSTICE (Qualitative Feedback Lens)
-   Use the six PJ dimensions ONLY to generate honest, specific feedback. No scoring.
-   - Voice: Candidate asserting their own perspective/position.
-   - Validation: Responses building on earlier content.
-   - Neutrality: Specific evidence vs vague/socially desirable framing.
-   - Respect: Owning decisions vs over-hedging/deflecting.
-   - Motivation: Genuine investment/elaboration vs minimal compliance.
-   - Explanation: Explaining 'why' decisions were made.
+6. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
+   Score authenticity vs. impression management across three dimensions:
+   - Voice: Did they say something personal and genuine not already in their CV?
+   - Motivation: Did they give a real personal reason for wanting this role, not from job description?
+   - Explanation: Did they go further than the question asked, explaining why and what they learned?
    
-   Identify 1-2 dimensions with the clearest gaps.
+   Each dimension receives an orientation: 'self_verifying' | 'impression_managing' | 'balanced'.
+   Identify which dimension shows the strongest self-verification pattern.
    pj_observations: Max 2 plain English observations. Must reference specific candidate quotes. Use human terms, skip theoretical language.
-   NEVER mention 'Procedural Justice', 'Voice gap', or 'Validation' in the observations.
-   Instead of 'Voice gap', say 'Specific Ownership'. Instead of 'Validation', say 'Context Building'.
-   Example: "'I tried to support the team' — try saying what you personally decided and why, rather than what you attempted." (No jargon)
+   NEVER mention 'Procedural Justice' or Cable & Kay theory names in the observations.
+   Instead, describe what you observed directly: 'You stayed very close to your CV language' or 'That felt like something you actually care about.'
+   Example: "'I want to make an impact' — tell me specifically what kind of impact and why that matters to you personally, not just for the company." (No jargon)
 
 7. SCAFFOLD & NOVELTY
    scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent'

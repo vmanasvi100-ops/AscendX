@@ -49,7 +49,7 @@ LAYER A — STUDENT-FACING FIELDS:
   starAnalysis, keywordCoverage, careerDevelopment, rubrics
 
 LAYER B — RESEARCHER-ONLY FIELDS:
-  meritVectors, triarchicMeritAlignment, proceduralJusticeDimensions,
+  meritVectors, triarchicMeritAlignment, professionalSelfVerificationSignals,
   impressionManagementScore, socialIdentityAwareness,
   algorithmicAversionScore, psychologicalSafetyScore,
   biasAndFairnessNote, integrityViolation, maskedTranscript
@@ -231,17 +231,105 @@ meritVectors: {
   primarySuggestionAnchor: string  // what Layer A's primary suggestion addresses
 }
 
-── proceduralJusticeDimensions (Lind et al., 1990) ─────────────
-All 6 dimensions must be scored independently. Never aggregate.
-proceduralJusticeDimensions: {
-  voice: { score: 0–100, evidenceBasis: string },
-  validation: { score: 0–100, evidenceBasis: string },
-  respect: { score: 0–100, evidenceBasis: string },
-  neutrality: { score: 0–100, evidenceBasis: string },
-  motivation: { score: 0–100, evidenceBasis: string },
-  explanation: { score: 0–100, evidenceBasis: string },
-  overallPJNote: string
-}
+── professionalSelfVerificationSignals (Cable & Kay, 2012) ──────
+
+You have two things in front of you:
+The CV — what the candidate carefully prepared before coming in.
+The transcript — what they actually said when put on the spot.
+
+Look at both together. Your job is simple:
+
+Did what they said in the room genuinely match and extend
+what they put on paper? Or did they just repeat their CV
+back in different words?
+
+When someone is being real — adding personal stories,
+saying something new, going beyond what was asked —
+that is self-verifying. They are showing you the actual
+person behind the document.
+
+When someone is playing it safe — staying close to CV
+language, not adding anything personal, giving the
+"right" answer rather than the honest one — that is
+impression managing. The performance is covering
+the person.
+
+Score these three things only:
+
+voice: {
+  score: 0–100,
+  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  evidenceBasis: string
+
+  Ask yourself:
+  Did they say something personal and genuine that
+  was not already sitting in their CV?
+
+  Yes, something new and real came through = higher score,
+  self-verifying.
+  No, they stayed inside what they already prepared =
+  lower score, impression managing.
+
+  Point to a specific moment in the transcript.
+  Never write a general observation.
+},
+
+motivation: {
+  score: 0–100,
+  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  evidenceBasis: string
+
+  Ask yourself:
+  Did they give a real personal reason for wanting
+  this role — something that felt like it came from
+  them, not from the job description?
+
+  Real and personal = higher score, self-verifying.
+  Sounded like they read the company website =
+  lower score, impression managing.
+
+  Be specific about what they said and why it
+  felt real or performed.
+},
+
+explanation: {
+  score: 0–100,
+  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  evidenceBasis: string
+
+  Ask yourself:
+  Did they go further than the question asked —
+  explaining why they made a decision, what happened
+  as a result, what they learned?
+
+  Went further without being asked = higher score,
+  self-verifying.
+  Answered just enough and stopped = lower score,
+  impression managing.
+
+  Name the exact moment they either opened up
+  or held back.
+},
+
+dominantMode: 'self_verifying' | 'impression_managing' | 'mixed',
+// Which pattern showed up most across all three?
+// Mixed only if genuinely split — not as a default.
+
+fitSignal: string,
+// One sentence in plain English.
+// Does this candidate feel like a genuine fit for
+// this role or are they performing fit?
+// Say what you saw. Never copy a template.
+
+feedbackImplication: string,
+// What did this change about the feedback you
+// wrote for the candidate?
+// Be specific — which suggestion came from this?
+
+researchNote: 'Cable & Kay (2012) Academy of Management
+Journal. Bridges: Kristof-Brown et al. (2005);
+Swann & Bosson (2010); Levashina et al. (2014).
+AI proxy — under investigation in AscendX RCT.'
 
 ── impressionManagementScore (Goffman, 1959) ───────────────────
 impressionManagementScore: {
@@ -418,18 +506,78 @@ text: string
               },
               required: ["autonomy", "competence", "relatedness", "lowestVector", "primarySuggestionAnchor"]
             },
-            proceduralJusticeDimensions: {
+            professionalSelfVerificationSignals: {
               type: Type.OBJECT,
               properties: {
-                voice: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                validation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                respect: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                neutrality: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                motivation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                explanation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                overallPJNote: { type: Type.STRING }
+                voice: {
+                  type: Type.OBJECT,
+                  properties: {
+                    score: { type: Type.NUMBER },
+                    orientation: {
+                      type: Type.STRING,
+                      enum: [
+                        'self_verifying',
+                        'impression_managing',
+                        'balanced'
+                      ]
+                    },
+                    evidenceBasis: { type: Type.STRING }
+                  },
+                  required: ["score", "orientation", "evidenceBasis"]
+                },
+                motivation: {
+                  type: Type.OBJECT,
+                  properties: {
+                    score: { type: Type.NUMBER },
+                    orientation: {
+                      type: Type.STRING,
+                      enum: [
+                        'self_verifying',
+                        'impression_managing',
+                        'balanced'
+                      ]
+                    },
+                    evidenceBasis: { type: Type.STRING }
+                  },
+                  required: ["score", "orientation", "evidenceBasis"]
+                },
+                explanation: {
+                  type: Type.OBJECT,
+                  properties: {
+                    score: { type: Type.NUMBER },
+                    orientation: {
+                      type: Type.STRING,
+                      enum: [
+                        'self_verifying',
+                        'impression_managing',
+                        'balanced'
+                      ]
+                    },
+                    evidenceBasis: { type: Type.STRING }
+                  },
+                  required: ["score", "orientation", "evidenceBasis"]
+                },
+                dominantMode: {
+                  type: Type.STRING,
+                  enum: [
+                    'self_verifying',
+                    'impression_managing',
+                    'mixed'
+                  ]
+                },
+                fitSignal: { type: Type.STRING },
+                feedbackImplication: { type: Type.STRING },
+                researchNote: { type: Type.STRING }
               },
-              required: ["voice", "validation", "respect", "neutrality", "motivation", "explanation", "overallPJNote"]
+              required: [
+                "voice",
+                "motivation",
+                "explanation",
+                "dominantMode",
+                "fitSignal",
+                "feedbackImplication",
+                "researchNote"
+              ]
             },
             impressionManagementScore: {
               type: Type.OBJECT,
@@ -530,7 +678,7 @@ text: string
             "careerDevelopment",
             "rubrics",
             "meritVectors",
-            "proceduralJusticeDimensions",
+            "professionalSelfVerificationSignals",
             "impressionManagementScore",
             "algorithmicAversionSignal",
             "socialIdentityAwareness",

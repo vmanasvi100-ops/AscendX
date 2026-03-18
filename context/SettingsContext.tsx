@@ -14,6 +14,7 @@ interface SettingsContextType extends Settings {
   setReadAloud: (enabled: boolean) => void;
   setSpeechRate: (speechRate: SpeechRate) => void;
   setVideoEnabled: (enabled: boolean) => void;
+  setCoachMarkTheme: (theme: CoachMarkTheme) => void;
   cvText: string;
   setCvText: (text: string) => void;
   activeQuestions: Question[];
@@ -91,6 +92,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [readAloud, setReadAloud] = useState(true);
   const [speechRate, setSpeechRate] = useState<SpeechRate>(1);
   const [videoEnabled, setVideoEnabled] = useState(false);
+  const [coachMarkTheme, setCoachMarkTheme] = useState<CoachMarkTheme>('default');
   const [cvText, setCvText] = useState("");
   const [timerFramingCondition, setTimerFramingCondition] = useState<TimerFramingCondition>('elapsed');
   const [companyName, setCompanyName] = useState("");
@@ -148,7 +150,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     participantId, setParticipantId, condition, timerDisplay, setTimerDisplay, liveTools, setLiveTools,
     dyslexiaFont, setDyslexiaFont, visualFeedback, setVisualFeedback, audioCues, setAudioCues,
     gamification, setGamification, readAloud, setReadAloud,
-    speechRate, setSpeechRate, videoEnabled, setVideoEnabled, cvText, setCvText, activeQuestions, setActiveQuestions,
+    speechRate, setSpeechRate, videoEnabled, setVideoEnabled, coachMarkTheme, setCoachMarkTheme, cvText, setCvText, activeQuestions, setActiveQuestions,
     timerFramingCondition, setTimerFramingCondition,
     companyName, setCompanyName, targetRole, setTargetRole, jobDescription, setJobDescription,
     persistedAuditResult, setPersistedAuditResult, isPredictiveActive, setIsPredictiveActive,

@@ -189,7 +189,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
            - Aim to uncover the candidate's personality and their potential future involvement/endeavors in the company.
            - Reflect on company culture or values (e.g., autonomy, competence, relatedness).
            - Be highly specific to the participant's immediate response.
-           - Keep in mind Impression Management (how they present themselves), Procedural Justice (ensuring the process reflects fairness, voice, validation, respect, motivation, and clear information), and Social Identity Awareness (Highhouse et al., 2007) to observe if they are driven by intrinsic value expression or the pursuit of social recognition/alignment.
+           - Keep in mind Impression Management (how they present themselves), Professional Self-Verification (authenticity vs. performance — Cable & Kay, 2012), and Social Identity Awareness (Highhouse et al., 2007) to observe if they are driven by intrinsic value expression or the pursuit of social recognition/alignment.
            - **Provide Explanations**: When asking follow-up probes, briefly explain *why* you are asking. Research shows that providing explanations in AI/video interviews increases fairness perceptions and organizational attractiveness (Chapman et al., 2003; Folger et al., 2022; McCarthy et al., 2017; Basch & Melchers, 2019; Hausknecht et al., 2004).
         5. Act as both a 'Standard Auditor' (checking for facts/STAR) and a 'Scientific Auditor' (analyzing behavioral patterns and coherence).
         6. Provide brief, encouraging follow-ups if they miss key STAR components.

@@ -718,8 +718,13 @@ ${detailedFeedback.meritVectors ? `- Autonomy:   ${detailedFeedback.meritVectors
 - Competence: ${detailedFeedback.meritVectors.competence.score}/100 — ${detailedFeedback.meritVectors.competence.evidenceBasis}
 - Relatedness:${detailedFeedback.meritVectors.relatedness.score}/100 — ${detailedFeedback.meritVectors.relatedness.evidenceBasis}` : 'SDT data unavailable.'}
 
-## 11. PROCEDURAL JUSTICE DIMENSIONS (Lind et al., 1990)
-${detailedFeedback.proceduralJusticeDimensions ? Object.entries(detailedFeedback.proceduralJusticeDimensions).filter(([k]) => k !== 'overallPJNote').map(([k, v]: [string, any]) => `- ${k.charAt(0).toUpperCase() + k.slice(1)}: ${v.score}/100 — ${v.evidenceBasis}`).join('\n') + `\nNote: ${detailedFeedback.proceduralJusticeDimensions.overallPJNote}` : 'PJ data unavailable.'}
+## 11. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
+${detailedFeedback.professionalSelfVerificationSignals ? `- Voice (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.voice?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.voice?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.voice?.evidenceBasis || ''}
+- Motivation (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.motivation?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.motivation?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.motivation?.evidenceBasis || ''}
+- Explanation (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.explanation?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.explanation?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.explanation?.evidenceBasis || ''}
+- Dominant Mode: ${detailedFeedback.professionalSelfVerificationSignals.dominantMode || 'N/A'}
+- Fit Signal: ${detailedFeedback.professionalSelfVerificationSignals.fitSignal || 'N/A'}
+- Feedback Implication: ${detailedFeedback.professionalSelfVerificationSignals.feedbackImplication || 'N/A'}` : 'Professional Self-Verification Signals data unavailable.'}
 
 ## 12. SCAFFOLDED LEARNING (Vygotsky, 1978)
 ${detailedFeedback.scaffoldedLearningSignal ? `- ZPD Observation: ${detailedFeedback.scaffoldedLearningSignal.zpdProgressionObservation || 'N/A'}
@@ -809,7 +814,7 @@ ${pa ? `
 - Fluid Reasoning (Gf):          ${pa.chc_signals.gf.toUpperCase()}
 - Quantitative/Technical (Gq):   ${pa.chc_signals.gq.toUpperCase()}
 
-### PROCEDURAL JUSTICE (PJ) OBSERVATIONS
+### PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
 ${pa.pj_observations.map(obs => `- ${obs}`).join('\n')}
 
 ### GOFFMAN PRESENTATION SCORES
@@ -915,7 +920,7 @@ Professional Performance Intelligence
                             <div className="w-16 h-16 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
                             <div className="text-center">
                                 <p className="text-sm font-black uppercase tracking-widest text-slate-900">Synthesizing Performance Summary</p>
-                                <p className="text-[10px] font-medium text-slate-500">Mitigating bias and ensuring procedural justice...</p>
+                                <p className="text-[10px] font-medium text-slate-500">Analyzing authenticity and self-verification patterns...</p>
                             </div>
                         </div>
                     ) : detailedFeedback ? (
@@ -1147,34 +1152,53 @@ Professional Performance Intelligence
                                     </section>
                                 )}
 
-                                {/* Procedural Justice Dimensions */}
-                                {detailedFeedback.proceduralJusticeDimensions && (
+                                {/* Professional Self-Verification Signals */}
+                                {detailedFeedback.professionalSelfVerificationSignals && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
-                                            <Scale size={16} /> Procedural Justice
+                                            <Award size={16} /> Professional Self-Verification
                                         </h3>
-                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Lind et al. (1990) — Candidate Perception Metrics</p>
-                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                                            {(['voice', 'validation', 'respect', 'neutrality', 'motivation', 'explanation'] as const).map((key) => {
-                                                const d = detailedFeedback.proceduralJusticeDimensions?.[key];
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Cable & Kay (2012) — Authenticity vs. Performance Mode</p>
+                                        <div className="space-y-4 mb-4">
+                                            {(['voice', 'motivation', 'explanation'] as const).map((key) => {
+                                                const d = detailedFeedback.professionalSelfVerificationSignals?.[key];
                                                 if (!d) return null;
+                                                const isSelfVerifying = d.orientation === 'self_verifying';
                                                 return (
-                                                    <div key={key} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                                                        <div className="flex justify-between items-center mb-1">
-                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{key}</span>
-                                                            <span className="text-sm font-black text-indigo-600">{d.score}</span>
+                                                    <div key={key} className={`p-4 rounded-2xl border ${isSelfVerifying ? 'bg-emerald-50 border-emerald-100' : d.orientation === 'impression_managing' ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 capitalize">{key}</span>
+                                                                <span className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-full ${isSelfVerifying ? 'bg-emerald-100 text-emerald-700' : d.orientation === 'impression_managing' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                                    {d.orientation?.replace(/_/g, ' ')}
+                                                                </span>
+                                                            </div>
+                                                            <span className={`text-base font-black ${isSelfVerifying ? 'text-emerald-600' : d.orientation === 'impression_managing' ? 'text-amber-600' : 'text-slate-600'}`}>{d.score}</span>
                                                         </div>
-                                                        <div className="h-1 bg-slate-200 rounded-full mb-2">
-                                                            <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${d.score}%` }} />
+                                                        <div className={`h-1.5 rounded-full mb-2 ${isSelfVerifying ? 'bg-emerald-200' : d.orientation === 'impression_managing' ? 'bg-amber-200' : 'bg-slate-200'}`}>
+                                                            <div className={`h-full rounded-full ${isSelfVerifying ? 'bg-emerald-500' : d.orientation === 'impression_managing' ? 'bg-amber-500' : 'bg-slate-400'}`} style={{ width: `${d.score}%` }} />
                                                         </div>
-                                                        <p className="text-[9px] text-slate-500 leading-tight line-clamp-2">{d.evidenceBasis}</p>
+                                                        <p className="text-[9px] text-slate-600 leading-snug">{d.evidenceBasis}</p>
                                                     </div>
                                                 );
                                             })}
                                         </div>
-                                        {detailedFeedback.proceduralJusticeDimensions?.overallPJNote && (
+                                        {detailedFeedback.professionalSelfVerificationSignals?.dominantMode && (
+                                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 mb-4">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600 mb-1">Dominant Mode</p>
+                                                <p className="text-[10px] font-bold text-indigo-800 capitalize">{detailedFeedback.professionalSelfVerificationSignals.dominantMode?.replace(/_/g, ' ')}</p>
+                                            </div>
+                                        )}
+                                        {detailedFeedback.professionalSelfVerificationSignals?.fitSignal && (
+                                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 mb-2">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Fit Signal</p>
+                                                <p className="text-[10px] font-medium text-slate-700 italic">"{detailedFeedback.professionalSelfVerificationSignals.fitSignal}"</p>
+                                            </div>
+                                        )}
+                                        {detailedFeedback.professionalSelfVerificationSignals?.feedbackImplication && (
                                             <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                                                <p className="text-[10px] font-medium text-indigo-800 italic">{detailedFeedback.proceduralJusticeDimensions.overallPJNote}</p>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600 mb-1">Feedback Implication</p>
+                                                <p className="text-[10px] font-medium text-indigo-800">{detailedFeedback.professionalSelfVerificationSignals.feedbackImplication}</p>
                                             </div>
                                         )}
                                     </section>

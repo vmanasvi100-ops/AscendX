@@ -123,7 +123,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                     You are doing well. Stay focused on your core logic.
                   </p>
                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">
-                    Applying Procedural Justice Framework
+                    Analyzing Self-Verification Signals
                   </p>
                 </div>
               </div>
@@ -356,12 +356,12 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                 </div>
               )}
 
-              {/* Procedural Justice Observations (Communicative Precision) */}
+              {/* Professional Self-Verification Observations (Authenticity Assessment) */}
               {analysis.pj_observations && analysis.pj_observations.length > 0 && (
                 <div className="bg-white rounded-[40px] border border-slate-200 p-8 shadow-sm">
                   <div className="flex items-center gap-2 mb-6">
                     <MessageSquare size={18} className="text-indigo-600" />
-                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-900">Communicative Precision</h4>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-900">Authenticity Assessment</h4>
                   </div>
                   <div className="space-y-4">
                     {analysis.pj_observations.map((obs, idx) => (
@@ -373,7 +373,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
                       </div>
                     ))}
                   </div>
-                  <p className="text-[9px] text-slate-400 mt-6 uppercase font-black tracking-widest text-center">Diagnostic Lens: Procedural Justice (Qualitative)</p>
+                  <p className="text-[9px] text-slate-400 mt-6 uppercase font-black tracking-widest text-center">Diagnostic Lens: Professional Self-Verification (Cable & Kay, 2012)</p>
                 </div>
               )}
 
