@@ -614,6 +614,7 @@ if (recordingStatus === 'recording') await handleRecord();
                 careerDevelopment: { certifications: [], nextSteps: ["Restart Simulation"] },
                 maskedTranscript: { text: transcript || "" }
             });
+            setIsGeneratingFeedback(false); // ensure spinner clears when skipping the API call
             return;
         }
 

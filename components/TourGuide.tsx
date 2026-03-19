@@ -72,7 +72,16 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
 
     useLayoutEffect(() => {
         let retryCount = 0;
-        const maxRetries = 60; // Allow additional time for slow-loading/transitioning UI
+        // Report detail sections (performance summary, rubrics, CHC, insights) are rendered only after
+        // the AI feedback API call completes. Use a much longer retry window (90s) so the tour waits
+        // for real content instead of falling back to a floating centered popover over the loading state.
+        const reportDetailTargets = [
+            'report-performance-summary',
+            'report-rubrics-grid',
+            'report-chc-clusters',
+            'report-actionable-insights',
+        ];
+        const maxRetries = reportDetailTargets.includes(step.targetId) ? 450 : 60;
         let timeoutId: NodeJS.Timeout | null = null;
 
         const centerPopover = () => {
@@ -95,24 +104,6 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
         };
 
         const positionForElement = (element: HTMLElement) => {
-            // For report-phase elements, scroll within the modal container
-            const reportStepTargets = ['report-header', 'report-performance-summary', 'report-rubrics-grid', 'report-chc-clusters', 'report-actionable-insights'];
-            if (reportStepTargets.includes(step.targetId)) {
-                const modalContent = document.querySelector('.bg-white.w-full.max-w-4xl');
-                if (modalContent && 'scrollTop' in modalContent) {
-                    // Get the position of the element relative to the modal content container
-                    const rect = element.getBoundingClientRect();
-                    const modalRect = modalContent.getBoundingClientRect();
-                    
-                    // Calculate how much to scroll
-                    const elementRelativeTop = rect.top - modalRect.top;
-                    const currentScrollTop = modalContent.scrollTop || 0;
-                    const targetScrollTop = currentScrollTop + elementRelativeTop - 100; // 100px offset for header
-                    
-                    (modalContent as HTMLElement).scrollTop = Math.max(0, targetScrollTop);
-                }
-            }
-
             const rect = element.getBoundingClientRect();
             const popoverPos = getPopoverPosition(rect, step.placement);
             const padding = 4;
