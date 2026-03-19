@@ -116,11 +116,11 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
         {/* Report Content */}
         <div className="p-8 md:p-12 space-y-12 max-w-[800px] mx-auto w-full">
           {/* Title Section */}
-          <div className="border-b-4 border-slate-900 pb-8">
+          <div id="report-header" className="border-b-4 border-slate-900 pb-8">
             <h1 className="text-3xl font-black mb-2 uppercase tracking-tight">Probing Deep-Dive Analysis</h1>
             <div className="flex justify-between items-end">
               <div>
-                <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">AscendX Coherence Auditor</p>
+                <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Ascend Coherence Auditor</p>
                 <p className="text-lg font-bold mt-2">Candidate ID: {participantId || "Anonymous"}</p>
               </div>
               <div className="text-right">
@@ -130,8 +130,8 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </div>
           </div>
 
-          {/* Section 1: Probe Context */}
-          <div className="space-y-6">
+          {/* Section 1: Probe Context / Performance Summary */}
+          <div id="report-performance-summary" className="space-y-6">
             <div className="p-8 bg-slate-900 text-white rounded-3xl relative overflow-hidden group">
               <div className="absolute -top-10 -right-10 p-4 opacity-5 group-hover:opacity-10 transition-opacity rotate-12">
                 <Brain size={160} />
@@ -178,8 +178,8 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </div>
           </div>
 
-          {/* Section 2: STAR Progression */}
-          <section className="space-y-6">
+          {/* Section 2: STAR Progression / Rubrics */}
+          <section id="report-rubrics-grid" className="space-y-6">
             <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
               <Target size={16} />
               1. Narrative Structure (STAR)
@@ -269,8 +269,8 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </section>
           )}
 
-          {/* Section 5: Professional Depth & Skill Audit */}
-          <section className="space-y-12">
+          {/* Section 5: Professional Depth & Skill Audit / CHC Clusters */}
+          <section id="report-chc-clusters" className="space-y-12">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center gap-2">
               <Activity size={16} className="text-indigo-600" />
               4. Professional Depth & Skill Audit
@@ -371,9 +371,9 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </div>
           </section>
 
-          {/* Section 6: Coherence Coach Guidance */}
+          {/* Section 6: Coherence Coach Guidance / Actionable Insights */}
           {analysis.coaching_guidance && (
-            <section className="space-y-6">
+            <section id="report-actionable-insights" className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
                 <Award size={16} />
                 5. Coherence Coach Guidance

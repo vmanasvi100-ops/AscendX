@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Brain, Target, ShieldCheck, Sparkles, ChevronRight, Activity, ArrowRight, UserCheck, AlertCircle, Users, BarChart3, ShieldAlert, TrendingUp, TrendingDown, MessageSquare, Award } from 'lucide-react';
 import { Probe, ProbeAnalysis } from '../types';
@@ -35,6 +36,7 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
   }, [analysis]);
 
   return (
+  <>
     <div className="flex flex-col h-full bg-slate-50/50 rounded-[32px] border border-slate-200 overflow-hidden shadow-inner">
       <div className="px-3 py-3 border-b bg-white flex items-center justify-between gap-2">
         <div className="flex items-center min-w-0">
@@ -438,19 +440,22 @@ const ProbingPipeline: React.FC<ProbingPipelineProps> = ({
         </div>
       )}
 
-      {/* Full Report Modal */}
+      </div>
+
+    {showFullReport && currentProbe && analysis && createPortal(
       <AnimatePresence>
-        {showFullReport && currentProbe && analysis && (
-          <ProbingReport
-            probe={currentProbe}
-            analysis={analysis}
-            onClose={() => setShowFullReport(false)}
-            participantId={participantId}
-          />
-        )}
-      </AnimatePresence>
-    </div>
+        <ProbingReport
+          probe={currentProbe}
+          analysis={analysis}
+          onClose={() => setShowFullReport(false)}
+          participantId={participantId}
+        />
+      </AnimatePresence>,
+      document.body
+    )}
+  </>
   );
 };
+     
 
 export default ProbingPipeline;

@@ -46,6 +46,12 @@ const getPopoverPosition = (targetRect: DOMRect, placement: TourStep['placement'
     return { top, left };
 };
 
+// Keep tour overlays above app modals/overlays (e.g., loading states) so coach marks remain visible.
+const TOUR_Z_INDEX = 99999;
+const HIGHLIGHT_Z_INDEX = TOUR_Z_INDEX - 1;
+const OVERLAY_Z_INDEX = TOUR_Z_INDEX - 2;
+const POPOVER_Z_INDEX = TOUR_Z_INDEX;
+
 const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalSteps, onNext, onSkipSection, onExit }) => {
     const { audioCues, speechRate } = useSettings();
     const [highlightStyle, setHighlightStyle] = useState<React.CSSProperties>({ opacity: 0 });
@@ -66,8 +72,66 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
 
     useLayoutEffect(() => {
         let retryCount = 0;
-        const maxRetries = 30; // Try for ~4.5 seconds to allow React state transitions
-        let timeoutId: NodeJS.Timeout;
+        const maxRetries = 60; // Allow additional time for slow-loading/transitioning UI
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        const centerPopover = () => {
+            setPopoverStyle({
+                top: Math.max(16, window.innerHeight / 2 - 90),
+                left: Math.max(16, window.innerWidth / 2 - 160),
+                opacity: 1,
+                transform: 'translateY(0px)',
+            });
+        };
+
+        const isVisibleElement = (element: HTMLElement) => {
+            const style = window.getComputedStyle(element);
+            return (
+                style.visibility !== 'hidden' &&
+                style.display !== 'none' &&
+                element.offsetWidth > 0 &&
+                element.offsetHeight > 0
+            );
+        };
+
+        const positionForElement = (element: HTMLElement) => {
+            // For report-phase elements, scroll within the modal container
+            const reportStepTargets = ['report-header', 'report-performance-summary', 'report-rubrics-grid', 'report-chc-clusters', 'report-actionable-insights'];
+            if (reportStepTargets.includes(step.targetId)) {
+                const modalContent = document.querySelector('.bg-white.w-full.max-w-4xl');
+                if (modalContent && 'scrollTop' in modalContent) {
+                    // Get the position of the element relative to the modal content container
+                    const rect = element.getBoundingClientRect();
+                    const modalRect = modalContent.getBoundingClientRect();
+                    
+                    // Calculate how much to scroll
+                    const elementRelativeTop = rect.top - modalRect.top;
+                    const currentScrollTop = modalContent.scrollTop || 0;
+                    const targetScrollTop = currentScrollTop + elementRelativeTop - 100; // 100px offset for header
+                    
+                    (modalContent as HTMLElement).scrollTop = Math.max(0, targetScrollTop);
+                }
+            }
+
+            const rect = element.getBoundingClientRect();
+            const popoverPos = getPopoverPosition(rect, step.placement);
+            const padding = 4;
+
+            setHighlightStyle({
+                top: rect.top - padding,
+                left: rect.left - padding,
+                width: rect.width + padding * 2,
+                height: rect.height + padding * 2,
+                opacity: 1,
+            });
+
+            setPopoverStyle({
+                top: popoverPos.top,
+                left: popoverPos.left,
+                opacity: 1,
+                transform: 'translateY(0px)',
+            });
+        };
 
         const findAndPosition = () => {
             // Restore styles on previous target
@@ -77,9 +141,18 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
                 prevTargetRef.current = null;
             }
 
-            const targetElement = document.getElementById(step.targetId);
+            // Primary target lookup
+            let targetElement: HTMLElement | null = document.getElementById(step.targetId);
 
-            if (targetElement) {
+            // Fallback: If tour is at the start-step and the consent modal is open, highlight the "Enable & Continue" button.
+            if (!targetElement && step.targetId === 'welcome-start-button') {
+                const consentDialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+                if (consentDialog instanceof HTMLElement) {
+                    targetElement = consentDialog.querySelector('button');
+                }
+            }
+
+            if (targetElement && isVisibleElement(targetElement)) {
                 prevTargetRef.current = targetElement;
                 prevTargetStyleRef.current = {
                     zIndex: targetElement.style.zIndex,
@@ -90,53 +163,60 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
                 if (currentPos === 'static') {
                     targetElement.style.position = 'relative';
                 }
-                targetElement.style.zIndex = '12005';
+                targetElement.style.zIndex = `${HIGHLIGHT_Z_INDEX - 1}`;
 
+                // Show the popover immediately while we compute the final placement.
                 setHighlightStyle(prev => ({ ...prev, opacity: 0 }));
-                setPopoverStyle(prev => ({ ...prev, opacity: 0, transform: 'translateY(10px)' }));
+                centerPopover();
 
                 targetElement.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
 
                 timeoutId = setTimeout(() => {
-                    const rect = targetElement.getBoundingClientRect();
-                    const popoverPos = getPopoverPosition(rect, step.placement);
-                    const padding = 4;
+                    // If the element has been removed from the DOM, try again.
+                    if (!document.body.contains(targetElement)) {
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            timeoutId = setTimeout(findAndPosition, 200);
+                        }
+                        return;
+                    }
 
-                    setHighlightStyle({
-                        top: rect.top - padding,
-                        left: rect.left - padding,
-                        width: rect.width + padding * 2,
-                        height: rect.height + padding * 2,
-                        opacity: 1
-                    });
+                    if (!isVisibleElement(targetElement) && retryCount < maxRetries) {
+                        retryCount++;
+                        timeoutId = setTimeout(findAndPosition, 200);
+                        return;
+                    }
 
-                    setPopoverStyle({
-                        top: popoverPos.top,
-                        left: popoverPos.left,
-                        opacity: 1,
-                        transform: 'translateY(0px)',
-                    });
+                    positionForElement(targetElement);
                 }, 150);
             } else if (retryCount < maxRetries) {
                 retryCount++;
-                timeoutId = setTimeout(findAndPosition, 150);
-            } else {
-                // Fallback: element not found — hide highlight but keep popover centered on screen
-                // so the tour doesn't silently break during screen transitions
+                // Show the tour popover quickly while we wait for the element to appear.
                 setHighlightStyle({ opacity: 0 });
-                setPopoverStyle({
-                    top: Math.max(16, window.innerHeight / 2 - 90),
-                    left: Math.max(16, window.innerWidth / 2 - 160),
-                    opacity: 1,
-                    transform: 'translateY(0px)',
-                });
+                centerPopover();
+                timeoutId = setTimeout(findAndPosition, 200);
+            } else {
+                // Fallback: element not found — keep popover centered.
+                setHighlightStyle({ opacity: 0 });
+                centerPopover();
+            }
+        };
+
+        const repositionOnLayoutChange = () => {
+            const targetElement = document.getElementById(step.targetId);
+            if (targetElement && isVisibleElement(targetElement)) {
+                positionForElement(targetElement);
             }
         };
 
         findAndPosition();
+        window.addEventListener('resize', repositionOnLayoutChange);
+        window.addEventListener('scroll', repositionOnLayoutChange, true);
 
         return () => {
             if (timeoutId) clearTimeout(timeoutId);
+            window.removeEventListener('resize', repositionOnLayoutChange);
+            window.removeEventListener('scroll', repositionOnLayoutChange, true);
         };
     }, [step.targetId, step.placement]);
 
@@ -150,13 +230,21 @@ const TourGuide: React.FC<TourGuideProps> = ({ step, currentStepIndex, totalStep
     }, []);
 
     return (
-        <div style={{ pointerEvents: 'auto' }}>
-            <div className="tour-overlay !z-[10000] fixed inset-0 bg-slate-900/40" style={{ opacity: highlightStyle['opacity'] ? 1 : 0 }}></div>
-            <div className="tour-highlight-box !z-[12006] pointer-events-none" style={highlightStyle} />
-            <div 
-                className="tour-popover bg-white rounded-lg shadow-2xl w-80 !z-[12007]" 
+        <div style={{ pointerEvents: 'none' }}>
+            <div
+                className="tour-overlay fixed inset-0 bg-slate-900/40"
+                style={{ opacity: highlightStyle['opacity'] ? 1 : 0, zIndex: OVERLAY_Z_INDEX, pointerEvents: 'none' }}
+            />
+            <div
+                className="tour-highlight-box"
+                style={{ ...highlightStyle, zIndex: HIGHLIGHT_Z_INDEX, pointerEvents: 'none' }}
+            />
+            <div
+                className="tour-popover bg-white rounded-lg shadow-2xl w-80"
                 style={{
                     ...popoverStyle,
+                    zIndex: POPOVER_Z_INDEX,
+                    pointerEvents: 'auto',
                     transition: 'top 0.1s ease-in-out, left 0.1s ease-in-out, opacity 0.2s ease-out, transform 0.2s ease-out'
                 }}
                 role="dialog"

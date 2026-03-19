@@ -203,7 +203,7 @@ export const tourSteps: TourStep[] = [
         id: 'toolkit-reports-1',
         targetId: 'ascend-toolkit-reports',
         title: 'Immediate Response Feedback',
-        content: "After each answer, you receive an immediate 'Flash Report' here. It summarizes your strengths and identifies exactly where you can deepen your next response.",
+        content: "After each answer, you receive an immediate 'Flash Report' here. It summarizes your strengths and identifies exactly where you can deepen your next response. The detailed feedback might not be visible due to lack of user input to generate a final session report",
         placement: 'left',
         component: 'interview',
         section: 'reports',

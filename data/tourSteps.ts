@@ -184,7 +184,7 @@ export const tourSteps: TourStep[] = [
     },
     {
         id: 'interview-tab-report',
-        targetId: 'tab-report',
+        targetId: 'ascend-toolkit-reports',
         title: 'Session Record',
         content: "Track your progress through the session. Each completed question generates a summary of your strengths and gaps here.",
         placement: 'bottom',
