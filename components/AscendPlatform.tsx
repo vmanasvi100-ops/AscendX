@@ -7,6 +7,7 @@ import { generateProbe, analyzeProbeResponse, generateQuestionSummary } from '..
 import { generateDetailedFeedback } from '../services/feedbackService';
 import ProbingPipeline from './ProbingPipeline';
 import ProbingReport from './ProbingReport';
+import QuestionReport from './QuestionReport';
 import { AnimatePresence } from 'motion/react';
 import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, Sparkles, Scale, Layers, ShieldCheck, Target } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -131,10 +132,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [micCountdown, setMicCountdown] = useState(0);
     const [isMicOpening, setIsMicOpening] = useState(false);
     const [reassuringMessage, setReassuringMessage] = useState("");
+    const [probeHistory, setProbeHistory] = useState<string[]>([]);
 
     // Session Log Accumulator
     const [sessionLog, setSessionLog] = useState<SessionEntry[]>([]);
     const [reportModalEntry, setReportModalEntry] = useState<SessionEntry | null>(null);
+    const [questionReportEntry, setQuestionReportEntry] = useState<SessionEntry | null>(null);
 
     // Detailed Feedback State
     const [detailedFeedback, setDetailedFeedback] = useState<DetailedFeedback | null>(null);
@@ -373,11 +376,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 currentQuestion: { text: currentQuestion.text, type: 'interview', difficulty: currentQuestion.difficulty },
                 sessionPhaseIndex: currentQuestionIndex,
                 questionsAnsweredCount: currentQuestionIndex,
-                priorProbesThisQuestion: currentProbe ? currentProbe.probe : '',
-                candidateAnswer: transcript,
+                priorProbesThisQuestion: probeHistory.join(' | '),
+                candidateAnswer: transcript.slice(lastPhaseTranscriptLength.current),
                 conversationHistory: transcript.slice(-500),
             });
             setCurrentProbe(probe);
+            setProbeHistory(prev => [...prev, probe.probe]);
         } catch (err) {
             console.error("Failed to generate probe:", err);
         } finally {
@@ -467,11 +471,22 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 setProbeAnalysis(null);
                 setProbingTranscript("");
                 setIsGeneratingProbe(false);
+                setProbeHistory([]);
             }
         };
 
         // Handle Probing Answer
         if (isProbingActive) {
+            // Insights already exist — candidate explicitly chose to advance, respect it
+            if (probeAnalysis) {
+                setCurrentProbe(null);
+                setIsGeneratingProbe(false);
+                setReassuringMessage("The next question is on its way. Be focused, Be ready");
+                setActiveTab('plan');
+                await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
+                return;
+            }
+
             if (newSegment.length < 15) {
                 // Politely nudge for empty transcript
                 setActiveTab('plan');
@@ -480,12 +495,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 // Allow the state update to render before the blocking alert
                 alert("We couldn't catch that response! Please ensure your mic is active and you've provided a follow-up answer. We'll move to the next question for now.");
 
-                // Skip to next question
                 await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
                 return;
             }
 
-            // Valid response, analyze it
+            // Valid response — analyze once for insights then always advance
+            // Iterative probing only happens via the Deep Probe button
             setIsGeneratingProbe(true);
             try {
                 const analysis = await analyzeProbeResponse({
@@ -502,18 +517,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 setProbeAnalysis(analysis);
                 lastPhaseTranscriptLength.current = transcript.length;
 
-                if (!analysis.proceed) {
-                    // AI wants more depth - trigger iterative Probe (2, 3...)
-                    setActiveTab('plan');
-                    await triggerProbing();
-                } else {
-                    // AI is satisfied - clear state BEFORE final log/transition
-                    setProbeAnalysis(null);
-                    setCurrentProbe(null);
-                    setIsGeneratingProbe(false);
-                    setActiveTab('plan');
-                    await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
-                }
+                // Always advance — candidate chose to move on
+                setCurrentProbe(null);
+                setIsGeneratingProbe(false);
+                setReassuringMessage("The next question is on its way. Be focused, Be ready");
+                setActiveTab('plan');
+                await generateAndLog(currentQuestionIndex >= activeQuestions.length - 1);
             } catch (err) {
                 console.error("Iterative probing error:", err);
                 setProbeAnalysis(null);
@@ -566,6 +575,7 @@ if (recordingStatus === 'recording') await handleRecord();
             setProbingTranscript("");
             setActiveTab('plan');
             setIsGeneratingProbe(false);
+            setProbeHistory([]);
         }
     };
 
@@ -582,6 +592,7 @@ if (recordingStatus === 'recording') await handleRecord();
             setCurrentProbe(null);
             setProbeAnalysis(null);
             setProbingTranscript("");
+            setProbeHistory([]);
         }
     };
 
@@ -766,104 +777,6 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
         URL.revokeObjectURL(url);
     };
 
-    const handleDownloadQuestionReport = (entry: SessionEntry) => {
-        if (!entry.summaryReport) return;
-        const sr = entry.summaryReport;
-        const pa = entry.probeAnalysis;
-
-        let content = `
-# RESPONSE ANALYSIS REPORT: Q${entry.questionIndex + 1}
-Generated on: ${new Date().toLocaleString()}
-Participant: ${participantId}
-
-## 1. QUESTION CONTEXT
-"${entry.questionText}"
-
-## 2. ANSWER OVERVIEW
-${sr.answerOverview}
-
-## 3. STAR PERFORMANCE
-Phase Reached: ${STAR_LABELS[entry.starPhaseReached]}
-
-## 4. KEY STRENGTHS
-${sr.strengths.map(s => `- ${s}`).join('\n')}
-
-## 5. DEVELOPMENT POINTS
-${sr.developmentPoints.map(dp => `### ${dp.gap}
-- Why it matters: ${dp.whyItMatters}
-- Instruction: ${dp.instruction}`).join('\n\n')}
-
-## 6. PROBE ENGAGEMENT & CORRELATION
-### Engagement Narrative
-${sr.probeEngagement}
-
-### Act-Probe Correlation
-${sr.probeCorrelation}
-
-### Integrated Excellence Guidance
-${sr.integratedCoaching}
-
-${pa ? `
-## 7. HIGH-FIDELITY PSYCHOLOGICAL SIGNALS
-### SDT MERIT VECTORS
-- Autonomy:    ${pa.merit_vectors.autonomy}/100
-- Competence:  ${pa.merit_vectors.competence}/100
-- Relatedness: ${pa.merit_vectors.relatedness}/100
-- Lowest Vector: ${pa.merit_vectors.lowest_vector.toUpperCase()}
-
-### CHC COGNITIVE SIGNALS
-- Crystallised Intelligence (Gc): ${pa.chc_signals.gc.toUpperCase()}
-- Fluid Reasoning (Gf):          ${pa.chc_signals.gf.toUpperCase()}
-- Quantitative/Technical (Gq):   ${pa.chc_signals.gq.toUpperCase()}
-
-### PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
-${pa.pj_observations.map(obs => `- ${obs}`).join('\n')}
-
-### GOFFMAN PRESENTATION SCORES
-- Front Stage (Professional): ${pa.goffman_scores.front_stage}/100
-- Back Stage (Authentic):     ${pa.goffman_scores.back_stage}/100
-
-### SCAFFOLD ASSESSMENT
-- Dependency: ${pa.scaffold_dependency_signal.replace(/_/g, ' ').toUpperCase()}
-- Interpretation: ${pa.interpretation}
-- Decision: ${pa.reason}
-
-### COACHING GUIDANCE
-- Signal: ${pa.coaching_guidance?.framework_gap || 'N/A'}
-- Instruction: ${pa.coaching_guidance?.instruction || 'N/A'}
-- Example PHRASE: "${pa.coaching_guidance?.example_phrase || 'N/A'}"
-
-### REAL-TIME COACHING TIP
-${pa.coaching_tip || 'Focus on maintaining STAR structure.'}
-` : ''}
-
-## 8. TRANSCRIPT RECORD
-### ACT 1 (STAR RESPONSE)
-${entry.transcriptSlice || "Transcript unavailable for this segment."}
-
-${entry.probeAnalysis ? `
-### PROBE RESPONSE
-${transcript.slice(probingTranscript.length) || "Transcript unavailable for probe response."}
-` : ''}
-
-## 9. ONE THING TO PRACTISE
-${sr.practiceTask}
-
----
-Generated by Ascend Coherence Auditor
-Professional Performance Intelligence
-`.trim();
-
-        const blob = new Blob([content], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Response_Q${entry.questionIndex + 1}_${participantId}.md`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
 
     if (recordingStatus === 'uploaded') {
         return (
@@ -920,9 +833,11 @@ Professional Performance Intelligence
                     {isGeneratingFeedback ? (
                         <div className="flex flex-col items-center justify-center py-20 gap-6">
                             <div className="w-16 h-16 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
-                            <div className="text-center">
+                            <div className="text-center space-y-3">
                                 <p className="text-sm font-black uppercase tracking-widest text-slate-900">Synthesizing Performance Summary</p>
                                 <p className="text-[10px] font-medium text-slate-500">Analyzing authenticity and self-verification patterns...</p>
+                                <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">You did great — your full report is being prepared.</p>
+                                <p className="text-[10px] font-medium text-slate-400">This usually takes 20–30 seconds. Hang tight.</p>
                             </div>
                         </div>
                     ) : detailedFeedback ? (
@@ -1508,7 +1423,7 @@ Professional Performance Intelligence
                             <button
                                 id="ascend-deep-probe-button"
                                 onClick={triggerProbing}
-                                disabled={isGeneratingProbe || transcript.length < 20}
+                                disabled={isGeneratingProbe || transcript.length < 20 || currentQuestionIndex === 0}
                                 className={`px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all border ${isProbingActive
                                     ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
                                     : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'
@@ -1591,7 +1506,11 @@ Professional Performance Intelligence
                             ) : 'Stop Speaking'}
                         </button>
                         <button id="ascend-next-step-button" onClick={handleNextPhase} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1">
-                            {starPhase < 3 ? 'Next Step' : (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question ΓåÆ' : 'Finish Session')}
+                            {isProbingActive
+                                ? (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question →' : 'Finish Session')
+                                : starPhase < 3
+                                    ? 'Next Step'
+                                    : 'Deep Analyse & Advance'}
                         </button>
                         <button
                             onClick={handleNextQuestion}
@@ -1944,7 +1863,7 @@ Professional Performance Intelligence
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleDownloadQuestionReport(entry);
+                                                                setQuestionReportEntry(entry);
                                                             }}
                                                             className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
                                                         >
@@ -2003,6 +1922,21 @@ Professional Performance Intelligence
                         analysis={reportModalEntry.probeAnalysis}
                         onClose={() => setReportModalEntry(null)}
                         participantId={participantId}
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Session Log — Question Analysis Report Modal */}
+            <AnimatePresence>
+                {questionReportEntry && questionReportEntry.summaryReport && (
+                    <QuestionReport
+                        questionIndex={questionReportEntry.questionIndex}
+                        questionText={questionReportEntry.questionText}
+                        starPhaseReached={questionReportEntry.starPhaseReached}
+                        summaryReport={questionReportEntry.summaryReport}
+                        probeAnalysis={questionReportEntry.probeAnalysis}
+                        participantId={participantId}
+                        onClose={() => setQuestionReportEntry(null)}
                     />
                 )}
             </AnimatePresence>
