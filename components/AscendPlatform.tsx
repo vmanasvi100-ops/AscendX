@@ -1591,7 +1591,7 @@ Professional Performance Intelligence
                             ) : 'Stop Speaking'}
                         </button>
                         <button id="ascend-next-step-button" onClick={handleNextPhase} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1">
-                            {starPhase < 3 ? 'Next Step ΓåÆ' : (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question ΓåÆ' : 'Finish Session')}
+                            {starPhase < 3 ? 'Next Step' : (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question ΓåÆ' : 'Finish Session')}
                         </button>
                         <button
                             onClick={handleNextQuestion}
