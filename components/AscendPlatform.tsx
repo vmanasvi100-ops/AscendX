@@ -220,6 +220,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         if (finishSessionTrigger) {
             setFinishSessionTrigger(false);
             const forceFinish = async () => {
+                setReassuringMessage("");
                 try {
                     if (recordingStatus === 'recording') {
                         await handleRecord();
@@ -422,24 +423,26 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         const generateAndLog = async (isFinal = false) => {
             setIsGeneratingProbe(true);
             let summaryReport: QuestionSummaryReport | null = null;
-            try {
-                summaryReport = await generateQuestionSummary({
-                    accumulator: {
-                        questionId: currentQuestion.text,
-                        transcript: transcript,
-                        phaseAnalyses: [],
-                        probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
-                        timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
-                        responseDurations: {
-                            actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
-                            probes: [],
+            if (transcript.trim().length >= 20) {
+                try {
+                    summaryReport = await generateQuestionSummary({
+                        accumulator: {
+                            questionId: currentQuestion.text,
+                            transcript: transcript,
+                            phaseAnalyses: [],
+                            probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
+                            timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
+                            responseDurations: {
+                                actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
+                                probes: [],
+                            },
                         },
-                    },
-                    targetRole,
-                    companyName,
-                });
-            } catch (err) {
-                console.error('Failed to generate question summary:', err);
+                        targetRole,
+                        companyName,
+                    });
+                } catch (err) {
+                    console.error('Failed to generate question summary:', err);
+                }
             }
 
             setSessionLog(prev => [...prev, {
@@ -453,6 +456,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             }]);
 
             if (isFinal) {
+                setReassuringMessage("Thank you for your patience, we are redirecting you to the final feedback report. Thanks for taking your time out to practice with Ascend.");
                 // Ensure state is settled
                 await new Promise(r => setTimeout(r, 500));
                 setIsGeneratingFeedback(true);
@@ -1639,7 +1643,9 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                             <div className="w-12 h-12 border-4 border-indigo-50 border-t-indigo-600 rounded-full animate-spin" />
                                             <div className="space-y-1">
                                                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">{reassuringMessage || "The next question is on its way. Be focused, Be ready"}</p>
-                                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">You are doing well. Stay focused, the follow-up question will be ready in a while. Till then relax!</p>
+                                                {reassuringMessage && !reassuringMessage.includes("redirecting") && (
+                                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">You are doing well. Stay focused, the follow-up question will be ready in a while. Till then relax!</p>
+                                                )}
                                             </div>
                                         </div>
                                     )}

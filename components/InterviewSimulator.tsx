@@ -45,6 +45,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [keywordsMatched, setKeywordsMatched] = useState<string[]>([]);
   const [starProgress, setStarProgress] = useState({ s: false, t: false, a: false, r: false });
   const [showReport, setShowReport] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   const currentQuestion = interviewQuestions[currentQuestionIndex];
 
@@ -225,7 +226,11 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
   const finishInterview = () => {
     stopSession();
-    setShowReport(true);
+    setFinishing(true);
+    setTimeout(() => {
+      setFinishing(false);
+      setShowReport(true);
+    }, 2800);
   };
 
   // Heuristic Logic
@@ -245,59 +250,98 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     }
   };
 
-  if (showReport) {
-    return (
-      <div className="h-screen w-screen bg-[#0A0A0B] flex items-center justify-center p-8 animate-fade-in">
-        <div className="max-w-4xl w-full bg-[#0D0D0E] border border-white/10 rounded-[40px] p-12 shadow-2xl">
-          <div className="flex items-center gap-6 mb-12">
-            <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/20">
-              <CheckCircle2 className="w-10 h-10 text-white" />
-            </div>
-            <div>
-              <h1 className="text-4xl font-black text-white tracking-tight">Interview Complete</h1>
-              <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Interview Feedback Report</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-            <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
-              <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Alignment Score</span>
-              <div className="text-4xl font-black text-white">84%</div>
-              <p className="text-[10px] text-emerald-400 font-bold mt-2">+12% from last session</p>
-            </div>
-            <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
-              <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Avg Pacing</span>
-              <div className="text-4xl font-black text-white">{pacing} <span className="text-sm text-slate-500">WPM</span></div>
-              <p className="text-[10px] text-indigo-400 font-bold mt-2">Optimal: 130-160 WPM</p>
-            </div>
-            <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
-              <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Keyword Coverage</span>
-              <div className="text-4xl font-black text-white">{keywordsMatched.length} <span className="text-sm text-slate-500">/ {currentQuestion.keywords.length}</span></div>
-              <p className="text-[10px] text-amber-400 font-bold mt-2">Focus on "Impact" metrics</p>
-            </div>
-          </div>
-
-          <div className="space-y-6 mb-12">
-            <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest">AI Feedback Summary</h3>
-            <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-3xl">
-              <p className="text-slate-300 leading-relaxed">
-                Your narrative coherence is strong, particularly in the "Action" phase. However, your "Result" phase lacks quantifiable metrics. To improve your alignment with this role, ensure you mention specific percentages or dollar amounts when discussing outcomes.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            <button onClick={onExit} className="flex-1 py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Return to Dashboard</button>
-            <button onClick={() => window.location.reload()} className="flex-1 py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-500 transition-all">Practice Again</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-
   return (
     <div className={`h-screen w-screen bg-[#0A0A0B] text-slate-300 flex flex-col overflow-hidden ${dyslexiaFont ? 'font-dyslexia-friendly' : 'font-sans'}`}>
+
+      {/* Finish Session Overlay */}
+      <AnimatePresence>
+        {finishing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 z-[999] flex flex-col items-center justify-center backdrop-blur-2xl bg-black/70"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.5 }}
+              className="text-center space-y-4 px-8"
+            >
+              <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center mx-auto shadow-2xl shadow-emerald-500/30">
+                <CheckCircle2 className="w-8 h-8 text-white" />
+              </div>
+              <p className="text-white text-xl font-black tracking-tight">Thank you for your patience</p>
+              <p className="text-slate-400 text-sm font-medium max-w-sm leading-relaxed">
+                We are re-directing you to the <span className="text-emerald-400 font-bold">Overall Feedback Report</span> page
+              </p>
+              <p className="text-slate-600 text-xs font-black uppercase tracking-[0.2em]">Practice better, perform better</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence mode="wait">
+        {showReport ? (
+          <motion.div
+            key="report"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex-1 flex items-center justify-center p-8 overflow-y-auto"
+          >
+            <div className="max-w-4xl w-full bg-[#0D0D0E] border border-white/10 rounded-[40px] p-12 shadow-2xl">
+              <div className="flex items-center gap-6 mb-12">
+                <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/20">
+                  <CheckCircle2 className="w-10 h-10 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-4xl font-black text-white tracking-tight">Interview Complete</h1>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-sm">Interview Feedback Report</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Alignment Score</span>
+                  <div className="text-4xl font-black text-white">84%</div>
+                  <p className="text-[10px] text-emerald-400 font-bold mt-2">+12% from last session</p>
+                </div>
+                <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Avg Pacing</span>
+                  <div className="text-4xl font-black text-white">{pacing} <span className="text-sm text-slate-500">WPM</span></div>
+                  <p className="text-[10px] text-indigo-400 font-bold mt-2">Optimal: 130-160 WPM</p>
+                </div>
+                <div className="p-6 bg-white/2 border border-white/5 rounded-3xl">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2">Keyword Coverage</span>
+                  <div className="text-4xl font-black text-white">{keywordsMatched.length} <span className="text-sm text-slate-500">/ {currentQuestion.keywords.length}</span></div>
+                  <p className="text-[10px] text-amber-400 font-bold mt-2">Focus on "Impact" metrics</p>
+                </div>
+              </div>
+              <div className="space-y-6 mb-12">
+                <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest">AI Feedback Summary</h3>
+                <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-3xl">
+                  <p className="text-slate-300 leading-relaxed">
+                    Your narrative coherence is strong, particularly in the "Action" phase. However, your "Result" phase lacks quantifiable metrics. To improve your alignment with this role, ensure you mention specific percentages or dollar amounts when discussing outcomes.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <button onClick={onExit} className="flex-1 py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Return to Dashboard</button>
+                <button onClick={() => window.location.reload()} className="flex-1 py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-500 transition-all">Practice Again</button>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="session"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="flex flex-col flex-1 overflow-hidden"
+          >
 
       {/* Top Navigation Bar */}
       <header className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#0A0A0B]/80 backdrop-blur-md z-50">
@@ -573,6 +617,9 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.1); }
       `}</style>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
