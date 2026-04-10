@@ -560,4 +560,29 @@ export interface Question {
   keywords: string[];
   requirements: Requirement[];
   difficulty?: 'easy' | 'medium' | 'hard';
+  questionType?: 'behavioural' | 'motivational' | 'situational';
+}
+
+export interface JDCVAlignmentAnalysis {
+  matchScore: number;                          // 0–100
+  alignmentSummary: string;                    // 2-3 sentence overview
+  strengthAreas: Array<{
+    area: string;                              // e.g. "Project Management"
+    cvEvidence: string;                        // what the CV says
+    jdRequirement: string;                     // what the JD asks for
+  }>;
+  gapAreas: Array<{
+    area: string;                              // e.g. "Cloud Infrastructure"
+    jdRequirement: string;                     // what's missing
+    suggestion: string;                        // how to address in interview
+  }>;
+  experienceAlignment: Array<{
+    jdRequirement: string;                     // specific JD requirement
+    cvEvidence: string;                        // closest CV evidence
+    alignmentLevel: 'strong' | 'partial' | 'weak' | 'missing';
+  }>;
+  keywordAudit: {
+    present: string[];
+    missing: string[];
+  };
 }

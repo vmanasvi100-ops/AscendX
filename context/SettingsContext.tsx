@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult } from '../types';
+import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult, JDCVAlignmentAnalysis } from '../types';
 import { tourSteps, interviewQuestions } from '../data';
 
 interface SettingsContextType extends Settings {
@@ -42,6 +42,12 @@ interface SettingsContextType extends Settings {
   endTour: (options?: { restore?: boolean }) => void;
   finishSessionTrigger: boolean;
   setFinishSessionTrigger: (trigger: boolean) => void;
+  questionsFinalized: boolean;
+  setQuestionsFinalized: (v: boolean) => void;
+  phase2Started: boolean;
+  setPhase2Started: (v: boolean) => void;
+  jdcvAlignmentAnalysis: JDCVAlignmentAnalysis | null;
+  setJdcvAlignmentAnalysis: (v: JDCVAlignmentAnalysis | null) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -104,6 +110,9 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [isPredictiveActive, setIsPredictiveActive] = useState(false);
 
   const [activeQuestions, setActiveQuestions] = useState<Question[]>(() => shuffleArray(interviewQuestions));
+  const [questionsFinalized, setQuestionsFinalized] = useState(false);
+  const [phase2Started, setPhase2Started] = useState(false);
+  const [jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis] = useState<JDCVAlignmentAnalysis | null>(null);
   const [isTourActive, setIsTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [finishSessionTrigger, setFinishSessionTrigger] = useState(false);
@@ -156,6 +165,9 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     persistedAuditResult, setPersistedAuditResult, isPredictiveActive, setIsPredictiveActive,
     isTourActive, tourStep, startTour, nextTourStep, jumpToTourStep, endTour,
     finishSessionTrigger, setFinishSessionTrigger,
+    questionsFinalized, setQuestionsFinalized,
+    phase2Started, setPhase2Started,
+    jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

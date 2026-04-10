@@ -112,7 +112,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
     const sessionPromise = ai.live.connect({
-      model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+      model: 'gemini-3-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
           console.log("AI Connection Established");
@@ -196,7 +196,7 @@ const InterviewSimulator: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         6. Provide brief, encouraging follow-ups if they miss key STAR components.
         7. Move to the next question only after the probing phase is satisfied.
         
-        Keep your tone professional, concise, and focused on deep job alignment.`
+        Keep your tone professional, concise, Adand focused on deep job alignment.`
       }
     });
 
