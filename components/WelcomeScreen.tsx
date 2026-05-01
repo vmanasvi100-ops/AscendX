@@ -7,7 +7,8 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import type { TimerDisplay, TimerFramingCondition, AnalyticsEventType, Question, RubricCriterion } from '../types';
 import GuidedCoachMark from './GuidedCoachMark';
 import ResumeCoach from './ResumeCoach';
-import { generateInitialQuestions } from '../services/questionService';
+import { generateInitialQuestions, generateJDCVAlignmentQuestions, generateCVCompetencyQuestions, generateJDUnderstandingQuestions } from '../services/questionService';
+import { QUESTION_REPOSITORY } from '../services/questionBank';
 
 // Set worker path for PDF.js (must be after all imports)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -89,7 +90,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         setTargetRole,
         jobDescription,
         setJobDescription,
-        isTourActive
+        isTourActive,
+        setQuestionsFinalized,
+        setPhase2Started,
+        setJdcvAlignmentAnalysis,
     } = useSettings();
 
     const [preSessionAnswer, setPreSessionAnswer] = useState<string | null>(null);
@@ -228,19 +232,52 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         setIsGeneratingQuestions(true);
         setGenerationError(null);
         try {
-            const questions = await generateInitialQuestions(
-                jobDescription,
-                companyName,
-                targetRole,
-                companyLink
-            );
-            if (questions.length > 0) {
-                setActiveQuestions(questions);
-                logEvent('questions_generated', { count: questions.length, company: companyName, role: targetRole });
-                onStart(); // Directly join session
+            // Phase 0: Repository questions — instant, no API
+            const phase0 = QUESTION_REPOSITORY;
+            setActiveQuestions(phase0);
+            onStart();
+
+            setQuestionsFinalized(false);
+            setPhase2Started(false);
+
+            // Phase 1: JD-based questions — always resolves so Phase 2 can always run
+            const phase1Promise = Promise.all([
+                generateInitialQuestions(jobDescription, companyName, targetRole, companyLink),
+                generateJDUnderstandingQuestions(jobDescription, targetRole, companyName),
+            ]).then(([jdQuestions, jdUnderstandingQuestions]) => {
+                const phase1 = [...jdQuestions, ...jdUnderstandingQuestions];
+                if (phase1.length > 0) {
+                    setActiveQuestions([...phase0, ...phase1]);
+                }
+                return phase1;
+            }).catch(err => {
+                console.error("Phase 1 question generation failed:", err);
+                return [] as Question[];
+            });
+
+            // Phase 2: CV-based questions — runs after Phase 1 regardless of its outcome
+            if (cvText?.trim()) {
+                phase1Promise.then(phase1 => {
+                    setPhase2Started(true);
+                    Promise.all([
+                        generateJDCVAlignmentQuestions(jobDescription, cvText, targetRole, companyName),
+                        generateCVCompetencyQuestions(cvText, targetRole, companyName),
+                    ]).then(([jdCvResult, cvCompetencyQuestions]) => {
+                        const phase2 = [...jdCvResult.questions, ...cvCompetencyQuestions];
+                        if (phase2.length > 0) {
+                            setActiveQuestions([...phase0, ...phase1, ...phase2]);
+                        }
+                        if (jdCvResult.analysis) {
+                            setJdcvAlignmentAnalysis(jdCvResult.analysis);
+                        }
+                    }).catch(err => console.error("Phase 2 question generation failed:", err))
+                    .finally(() => setQuestionsFinalized(true));
+                });
             } else {
-                setGenerationError("Failed to generate questions. Please try again.");
+                phase1Promise.finally(() => setQuestionsFinalized(true));
             }
+
+            logEvent('questions_generated', { count: phase0.length, company: companyName, role: targetRole });
         } catch (err) {
             setGenerationError("An error occurred while generating questions.");
         } finally {
@@ -567,7 +604,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                     </>
                                                 )}
                                             </div>
-                                            <p className="text-[10px] text-slate-400 mt-2 italic" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Our advanced interview practice plarform correlates your PDF content with your verbal performance to detect Magnitude Gaps.</p>
+                                            <p className="text-[10px] text-slate-400 mt-2 italic" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Please wait while the system aligns your input for question generation for the best interview experience. Our advanced interview practice platform correlates your PDF content with your verbal performance to detect Skill Gaps.</p>
                                         </div>
                                         {generationError && (
                                             <p className="text-xs font-bold text-rose-600 flex items-center gap-1">

@@ -82,20 +82,23 @@ interface AscendPlatformProps {
 
 const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => {
     const { 
-        videoEnabled, 
-        setVideoEnabled, 
-        dyslexiaFont, 
-        timerDisplay, 
-        liveTools, 
-        activeQuestions, 
-        cvText, 
-        companyName, 
-        targetRole, 
-        jobDescription, 
-        timerFramingCondition, 
+        videoEnabled,
+        setVideoEnabled,
+        dyslexiaFont,
+        timerDisplay,
+        liveTools,
+        activeQuestions,
+        cvText,
+        companyName,
+        targetRole,
+        jobDescription,
+        timerFramingCondition,
         participantId,
         isTourActive,
-        tourStep 
+        tourStep,
+        persistedAuditResult,
+        questionsFinalized,
+        jdcvAlignmentAnalysis,
     } = useSettings();
     const [starPhase, setStarPhase] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -143,6 +146,10 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [detailedFeedback, setDetailedFeedback] = useState<DetailedFeedback | null>(null);
     const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
     const [activeTab, setActiveTab] = useState<ToolkitTab>('plan');
+    const [lastQuestionCompleted, setLastQuestionCompleted] = useState(false);
+    const [waitingForMoreQuestions, setWaitingForMoreQuestions] = useState(false);
+    const waitingAtLength = useRef(0);
+    const reflectiveBreakShown = useRef(false); // ensure break only shows once per session
 
     const STAR_LABELS = ['Situation', 'Task', 'Action', 'Result'];
     const CATEGORIES = [
@@ -157,6 +164,51 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         logEvent('session_start', { mode: 'interview' });
         phaseStartTimestamp.current = Date.now();
     }, []);
+
+    // When new questions arrive while waiting mid-session, auto-advance to the next question
+    useEffect(() => {
+        if (!waitingForMoreQuestions) return;
+        if (activeQuestions.length > waitingAtLength.current) {
+            setWaitingForMoreQuestions(false);
+            setCurrentQuestionIndex(prev => prev + 1);
+            setStarPhase(0);
+            setSessionSeconds(0);
+            phaseStartTimestamp.current = Date.now();
+            setIsProbingActive(false);
+            setCurrentProbe(null);
+            setProbeAnalysis(null);
+            setProbingTranscript("");
+            setIsGeneratingProbe(false);
+            setProbeHistory([]);
+            setActiveTab('plan');
+            setReassuringMessage("Your next question is ready. Stay focused.");
+        } else if (questionsFinalized) {
+            // API is done but returned no new questions — this was truly the last question
+            // Dismiss the break and let the user finish
+            setWaitingForMoreQuestions(false);
+        }
+    }, [activeQuestions.length, waitingForMoreQuestions, questionsFinalized]);
+
+    // Minimum 10s break — if questions already ready, auto-advance after 10s for consistency
+    useEffect(() => {
+        if (!waitingForMoreQuestions || !questionsFinalized) return;
+        const timer = setTimeout(() => {
+            setWaitingForMoreQuestions(false);
+            setCurrentQuestionIndex(prev => prev + 1);
+            setStarPhase(0);
+            setSessionSeconds(0);
+            phaseStartTimestamp.current = Date.now();
+            setIsProbingActive(false);
+            setCurrentProbe(null);
+            setProbeAnalysis(null);
+            setProbingTranscript("");
+            setIsGeneratingProbe(false);
+            setProbeHistory([]);
+            setActiveTab('plan');
+            setReassuringMessage("Your personalised questions are ready. Stay focused.");
+        }, 10000);
+        return () => clearTimeout(timer);
+    }, [waitingForMoreQuestions, questionsFinalized]);
 
     useEffect(() => {
         localStorage.setItem('ascend_notes', userNotes);
@@ -282,7 +334,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
 
         try {
             const sessionPromise = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                model: 'gemini-3-flash-native-audio-preview-09-2025',
                 callbacks: {
                     onopen: () => {
                         const source = audioContext.createMediaStreamSource(mediaStream);
@@ -416,7 +468,17 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     };
 
     const handleNextPhase = async () => {
+        if (isGeneratingFeedback) return; // guard double-click
         if (recordingStatus === 'recording') await handleRecord();
+
+        // If last question insight already shown — Finish Session click goes straight to report
+        const isLastQ = currentQuestionIndex >= activeQuestions.length - 1;
+        if (isLastQ && lastQuestionCompleted) {
+            setReassuringMessage("Taking you to your final report...");
+            await new Promise(r => setTimeout(r, 400));
+            setRecordingStatus('uploaded');
+            return;
+        }
 
         const newSegment = transcript.slice(lastPhaseTranscriptLength.current).trim();
 
@@ -463,19 +525,26 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 setRecordingStatus('uploaded');
                 await handleGenerateFinalFeedback();
             } else {
-                setActiveTab('plan');
-                // Ensure immediate reassurance if there's any lag in question load
-                setReassuringMessage("The next question is on its way. Be focused, Be ready");
-                setCurrentQuestionIndex(prev => prev + 1);
-                setStarPhase(0);
-                setSessionSeconds(0);
-                phaseStartTimestamp.current = Date.now();
-                setIsProbingActive(false);
-                setCurrentProbe(null);
-                setProbeAnalysis(null);
-                setProbingTranscript("");
-                setIsGeneratingProbe(false);
-                setProbeHistory([]);
+                // After Q10 (index 9) — always show reflective break before advancing
+                if (currentQuestionIndex === 9 && !reflectiveBreakShown.current) {
+                    reflectiveBreakShown.current = true;
+                    waitingAtLength.current = activeQuestions.length;
+                    setWaitingForMoreQuestions(true);
+                    // The break effect handles auto-advance after 10s or when questions arrive
+                } else {
+                    setActiveTab('plan');
+                    setReassuringMessage("The next question is on its way. Be focused, Be ready");
+                    setCurrentQuestionIndex(prev => prev + 1);
+                    setStarPhase(0);
+                    setSessionSeconds(0);
+                    phaseStartTimestamp.current = Date.now();
+                    setIsProbingActive(false);
+                    setCurrentProbe(null);
+                    setProbeAnalysis(null);
+                    setProbingTranscript("");
+                    setIsGeneratingProbe(false);
+                    setProbeHistory([]);
+                }
             }
         };
 
@@ -544,8 +613,76 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             lastPhaseTranscriptLength.current = transcript.length;
             phaseStartTimestamp.current = Date.now();
         } else {
-            // Act 1 Complete -> Trigger First Probe
-            if (decisionCountdown === 0) {
+            const isLastQuestion = currentQuestionIndex >= activeQuestions.length - 1;
+            if (isLastQuestion) {
+                // If more questions are still being generated, log this question then pause
+                if (!questionsFinalized) {
+                    waitingAtLength.current = activeQuestions.length;
+                    lastPhaseTranscriptLength.current = transcript.length;
+                    setSessionLog(prev => [...prev, {
+                        questionIndex: currentQuestionIndex,
+                        questionText: currentQuestion.text,
+                        starPhaseReached: starPhase,
+                        transcriptSlice: transcript,
+                        probe: currentProbe,
+                        probeAnalysis: probeAnalysis,
+                        summaryReport: null,
+                    }]);
+                    setWaitingForMoreQuestions(true);
+                    return;
+                }
+
+                // Truly the last question — show reassuring message, generate insight, switch to Insights
+                // NEVER advance question index or generate a new question here
+                if (!lastQuestionCompleted && !isGeneratingFeedback) {
+                    setReassuringMessage("You have completed your final question. We are now analysing your last response and compiling your full session report. This may take a moment — your effort and thought are worth the wait.");
+                    lastPhaseTranscriptLength.current = transcript.length;
+
+                    // Generate per-question summary inline (without calling generateAndLog which would advance the index)
+                    setIsGeneratingProbe(true);
+                    let summaryReport: QuestionSummaryReport | null = null;
+                    if (transcript.trim().length >= 20) {
+                        try {
+                            summaryReport = await generateQuestionSummary({
+                                accumulator: {
+                                    questionId: currentQuestion.text,
+                                    transcript: transcript,
+                                    phaseAnalyses: [],
+                                    probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
+                                    timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
+                                    responseDurations: {
+                                        actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
+                                        probes: [],
+                                    },
+                                },
+                                targetRole,
+                                companyName,
+                            });
+                        } catch (err) {
+                            console.error('Failed to generate last question summary:', err);
+                        }
+                    }
+                    setIsGeneratingProbe(false);
+
+                    setSessionLog(prev => [...prev, {
+                        questionIndex: currentQuestionIndex,
+                        questionText: currentQuestion.text,
+                        starPhaseReached: starPhase,
+                        transcriptSlice: transcript,
+                        probe: currentProbe,
+                        probeAnalysis: probeAnalysis,
+                        summaryReport: summaryReport,
+                    }]);
+
+                    // Show the last question insight
+                    setActiveTab('Report');
+
+                    // Start final report silently in background — user clicks Finish Session to navigate to it
+                    handleGenerateFinalFeedback();
+
+                    setLastQuestionCompleted(true);
+                }
+            } else if (decisionCountdown === 0) {
                 setDecisionCountdown(3);
                 triggerProbing();
                 lastPhaseTranscriptLength.current = transcript.length;
@@ -682,6 +819,25 @@ if (recordingStatus === 'recording') await handleRecord();
     const currentQuestion = activeQuestions[currentQuestionIndex] || activeQuestions[0];
     const currentRequirement = currentQuestion.requirements[starPhase];
 
+    // Derive coaching mode from question type and requirement ID prefix
+    const getCoachingMode = (q: typeof currentQuestion): 'star' | 'motivational' | 'jdcv' | 'jd-understanding' | 'cv-competency' => {
+        if (q.questionType === 'motivational') return 'motivational';
+        const firstId = q.requirements?.[0]?.id || '';
+        if (firstId.startsWith('jdcv')) return 'jdcv';
+        if (firstId.startsWith('jd')) return 'jd-understanding';
+        if (firstId.startsWith('cv')) return 'cv-competency';
+        return 'star';
+    };
+    const coachingMode = getCoachingMode(currentQuestion);
+
+    const COACHING_HEADERS: Record<typeof coachingMode, string> = {
+        'star':            'STAR Strategy Checklist',
+        'motivational':    'What to Cover',
+        'jdcv':            'Connecting Your Experience',
+        'jd-understanding':'Understanding the Role',
+        'cv-competency':   'Evidence from Your Background',
+    };
+
     const handleDownloadReport = () => {
         if (!detailedFeedback) return;
 
@@ -781,6 +937,36 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
         URL.revokeObjectURL(url);
     };
 
+
+    if (waitingForMoreQuestions) {
+        return (
+            <div className="min-h-screen w-screen bg-slate-950 flex flex-col items-center justify-center gap-10 animate-fade-in">
+                <div className="text-center space-y-4 max-w-lg px-8">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Reflective Break</p>
+                    <h1 className="text-3xl font-black text-white leading-tight">Well done so far.</h1>
+                    <p className="text-sm font-medium text-slate-400 leading-relaxed">
+                        Your next personalised questions are being prepared. Use this moment to reflect on what you've covered and reset your focus.
+                    </p>
+                </div>
+                <div className="space-y-3 max-w-sm w-full px-8">
+                    {[
+                        "Structure every answer: Situation → Task → Action → Result",
+                        "Be specific — real examples beat general statements",
+                        "Take your time. Silence before speaking is a strength",
+                    ].map((tip, i) => (
+                        <div key={i} className="flex items-start gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
+                            <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full mt-1.5 shrink-0" />
+                            <p className="text-xs font-medium text-slate-300">{tip}</p>
+                        </div>
+                    ))}
+                </div>
+                <div className="flex items-center gap-2 text-slate-600 text-[10px] font-black uppercase tracking-widest">
+                    <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
+                    Preparing your next questions...
+                </div>
+            </div>
+        );
+    }
 
     if (recordingStatus === 'uploaded') {
         return (
@@ -1188,6 +1374,128 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 )}
 
+                                {jdcvAlignmentAnalysis && (() => {
+                                    const a = jdcvAlignmentAnalysis;
+                                    // Pull session responses to jdcv-prefixed questions
+                                    const jdcvResponses = sessionLog.filter(e => e.questionText && activeQuestions.find(q => q.text === e.questionText && q.requirements?.[0]?.id?.startsWith('jdcv')));
+                                    return (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm space-y-8">
+                                        {/* Header */}
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
+                                                    <Target size={16} /> CV + JD Alignment Analysis
+                                                </h3>
+                                                <p className="text-[9px] font-medium text-slate-400 mt-1">Personalised to your CV and this role — including how you responded</p>
+                                            </div>
+                                            <div className="flex flex-col items-center shrink-0">
+                                                <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 font-black text-lg ${a.matchScore >= 70 ? 'border-emerald-400 text-emerald-600 bg-emerald-50' : a.matchScore >= 45 ? 'border-amber-400 text-amber-600 bg-amber-50' : 'border-rose-400 text-rose-600 bg-rose-50'}`}>
+                                                    {a.matchScore}
+                                                </div>
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">Match Score</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Summary */}
+                                        {a.alignmentSummary && (
+                                            <p className="text-sm text-slate-600 leading-relaxed">{a.alignmentSummary}</p>
+                                        )}
+
+                                        {/* Experience Alignment — JD requirement vs CV evidence */}
+                                        {a.experienceAlignment?.length > 0 && (
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Experience vs JD Requirements</p>
+                                                <div className="space-y-3">
+                                                    {a.experienceAlignment.map((item, i) => (
+                                                        <div key={i} className={`p-4 rounded-2xl border ${item.alignmentLevel === 'strong' ? 'bg-emerald-50 border-emerald-100' : item.alignmentLevel === 'partial' ? 'bg-amber-50 border-amber-100' : 'bg-rose-50 border-rose-100'}`}>
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{item.jdRequirement}</p>
+                                                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${item.alignmentLevel === 'strong' ? 'bg-emerald-200 text-emerald-700' : item.alignmentLevel === 'partial' ? 'bg-amber-200 text-amber-700' : item.alignmentLevel === 'weak' ? 'bg-orange-200 text-orange-700' : 'bg-rose-200 text-rose-700'}`}>{item.alignmentLevel}</span>
+                                                            </div>
+                                                            <p className="text-xs text-slate-600">{item.cvEvidence}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Strength & Gap areas */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {a.strengthAreas?.length > 0 && (
+                                                <div>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-3">Strength Areas</p>
+                                                    <div className="space-y-2">
+                                                        {a.strengthAreas.map((s, i) => (
+                                                            <div key={i} className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+                                                                <p className="text-[9px] font-black text-emerald-700 uppercase tracking-widest">{s.area}</p>
+                                                                <p className="text-[10px] text-slate-600 mt-1">{s.cvEvidence}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {a.gapAreas?.length > 0 && (
+                                                <div>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-600 mb-3">Gap Areas</p>
+                                                    <div className="space-y-2">
+                                                        {a.gapAreas.map((g, i) => (
+                                                            <div key={i} className="p-3 bg-rose-50 rounded-2xl border border-rose-100">
+                                                                <p className="text-[9px] font-black text-rose-700 uppercase tracking-widest">{g.area}</p>
+                                                                <p className="text-[10px] text-slate-600 mt-1">{g.suggestion}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Keyword audit */}
+                                        {a.keywordAudit && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2">Keywords Matched</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(a.keywordAudit.present || []).slice(0, 12).map((kw, i) => (
+                                                            <span key={i} className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[9px] font-black border border-emerald-200">{kw}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-rose-600 mb-2">Keywords Missing</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(a.keywordAudit.missing || []).slice(0, 12).map((kw, i) => (
+                                                            <span key={i} className="px-2 py-1 bg-rose-50 text-rose-700 rounded-lg text-[9px] font-black border border-rose-200">{kw}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* How they responded to alignment questions */}
+                                        {jdcvResponses.length > 0 && (
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-3">How You Responded to Alignment Questions</p>
+                                                <div className="space-y-3">
+                                                    {jdcvResponses.map((entry, i) => (
+                                                        <div key={i} className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                            <p className="text-[10px] font-black text-indigo-700 mb-2">"{entry.questionText}"</p>
+                                                            <div className="flex gap-1 mb-2">
+                                                                {['S','T','A','R'].map((s, si) => (
+                                                                    <div key={si} className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black ${si <= entry.starPhaseReached ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-400'}`}>{s}</div>
+                                                                ))}
+                                                            </div>
+                                                            {entry.summaryReport?.answerOverview && (
+                                                                <p className="text-[10px] text-slate-600">{entry.summaryReport.answerOverview}</p>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </section>
+                                    );
+                                })()}
+
                                 <section id="report-actionable-insights" className="bg-slate-900 text-white p-8 rounded-[40px] shadow-xl">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-indigo-400 mb-6 flex items-center gap-2">
                                         <Brain size={16} /> Actionable Remediation
@@ -1351,10 +1659,14 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         {currentQuestion.requirements.map((req, idx) => (
                                             <div key={req.id} className={`flex gap-4 transition-all duration-300 ${idx < starPhase ? 'opacity-30' : idx === starPhase ? 'scale-105' : 'opacity-60'}`}>
                                                 <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border-2 ${idx === starPhase ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white border-slate-200 text-slate-400'}`}>
-                                                    <span className="text-[11px] font-black">{STAR_LABELS[idx][0]}</span>
+                                                    <span className="text-[11px] font-black">
+                                                        {coachingMode === 'star' ? STAR_LABELS[idx][0] : idx + 1}
+                                                    </span>
                                                 </div>
                                                 <div className="flex-1">
-                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${idx === starPhase ? 'text-indigo-600' : 'text-slate-500'}`}>{STAR_LABELS[idx]}</span>
+                                                    {coachingMode === 'star' && (
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest ${idx === starPhase ? 'text-indigo-600' : 'text-slate-500'}`}>{STAR_LABELS[idx]}</span>
+                                                    )}
                                                     <p className={`text-[11px] font-bold leading-tight mt-0.5 ${idx === starPhase ? 'text-slate-900' : 'text-slate-500'}`}>{req.text}</p>
                                                 </div>
                                             </div>
@@ -1415,6 +1727,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                             {currentQuestion.difficulty}
                                         </span>
                                     )}
+                                    <span className="text-[9px] font-black text-slate-400 tabular-nums">{currentQuestionIndex + 1}/{activeQuestions.length}</span>
                                 </div>
                                 <div id="ascend-phase-indicators" className="flex gap-1.5">
                                     {STAR_LABELS.map((_, i) => (
@@ -1506,15 +1819,17 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 isProbingActive ? (
                                     micCountdown > 0 ? `Mic Opening in ${micCountdown}s...` :
                                         decisionCountdown > 0 ? `Answer Probe (${decisionCountdown}s)` : 'Answer Probe'
-                                ) : `Speak: ${STAR_LABELS[starPhase]}`
+                                ) : coachingMode === 'star' ? `Speak: ${STAR_LABELS[starPhase]}` : `Speak: Part ${starPhase + 1}`
                             ) : 'Stop Speaking'}
                         </button>
-                        <button id="ascend-next-step-button" onClick={handleNextPhase} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1">
+                        <button id="ascend-next-step-button" onClick={handleNextPhase} disabled={isGeneratingFeedback} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
                             {isProbingActive
                                 ? (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question →' : 'Finish Session')
                                 : starPhase < 3
                                     ? 'Next Step'
-                                    : 'Deep Analyse & Advance'}
+                                    : currentQuestionIndex >= activeQuestions.length - 1
+                                        ? (isGeneratingFeedback ? 'Preparing Report...' : 'Finish Session')
+                                        : 'Deep Analyse & Advance'}
                         </button>
                         <button
                             onClick={handleNextQuestion}
@@ -1534,10 +1849,10 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                 <div className="p-6 border-b bg-slate-50/50 flex items-center justify-between">
                     <div>
                         <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">
-                            {isProbingActive ? 'Probing Pipeline' : 'Coherence Auditor'}
+                            {isProbingActive ? 'Probing Pipeline' : currentQuestionIndex >= activeQuestions.length - 1 && starPhase >= 3 ? 'Session Complete' : 'Coherence Auditor'}
                         </h3>
                         <p className="text-xs font-bold text-slate-900 leading-tight">
-                            {isProbingActive ? 'Deep Domain Analysis' : `"${currentQuestion.text}"`}
+                            {isProbingActive ? 'Deep Domain Analysis' : currentQuestionIndex >= activeQuestions.length - 1 && starPhase >= 3 ? 'Review your Report Tab, then click Finish Session.' : `"${currentQuestion.text}"`}
                         </p>
                     </div>
                     {isProbingActive && (
@@ -1556,13 +1871,13 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="flex flex-col h-full">
-                        <div className="flex border-b bg-slate-50/30 p-1 flex-wrap gap-0.5">
+                        <div className="flex border-b bg-slate-50/30 p-1 gap-0.5">
                             {(['plan', 'notes', 'transcript', 'insights', 'report'] as ToolkitTab[]).map((tab) => (
                                 <button
                                     key={tab}
                                     id={`tab-${tab}`}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`flex-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-all relative ${activeTab === tab
+                                    className={`flex-1 py-2.5 text-[8px] font-black uppercase tracking-tight transition-all relative ${activeTab === tab
                                         ? 'bg-white text-indigo-600 shadow-sm rounded-xl'
                                         : 'text-slate-400 hover:text-slate-600'
                                         }`}
@@ -1582,24 +1897,48 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 <div id="ascend-toolkit-star" className="space-y-6 animate-fade-in">
                                     {!isProbingActive ? (
                                         <div className="border-b border-slate-100 pb-4">
-                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">STAR Strategy Checklist</h4>
+                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">
+                                                {COACHING_HEADERS[coachingMode]}
+                                            </h4>
+
+                                            {coachingMode === 'jdcv' && (
+                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
+                                                    This question is drawn from your CV and JD. Use your real experience to directly address what this role requires.
+                                                </p>
+                                            )}
+                                            {coachingMode === 'jd-understanding' && (
+                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
+                                                    Show you've thought deeply about what this role actually involves — not just the title.
+                                                </p>
+                                            )}
+                                            {coachingMode === 'cv-competency' && (
+                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
+                                                    This question probes a specific claim or achievement in your CV. Be precise — vague answers weaken credibility.
+                                                </p>
+                                            )}
+
                                             <div className="space-y-3">
                                                 {currentQuestion.requirements.map((req, idx) => (
                                                     <div key={req.id} className="flex items-start gap-3">
-                                                        <div className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black transition-all ${idx < starPhase ? 'bg-emerald-500 border-emerald-500 text-white' :
+                                                        <div className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black transition-all ${
+                                                            idx < starPhase ? 'bg-emerald-500 border-emerald-500 text-white' :
                                                             idx === starPhase ? 'bg-white border-indigo-600 text-indigo-600 shadow-sm' :
-                                                                'bg-white border-slate-200 text-slate-300'
-                                                            }`}>
+                                                            'bg-white border-slate-200 text-slate-300'
+                                                        }`}>
                                                             {idx < starPhase ? '✓' : idx + 1}
                                                         </div>
                                                         <div className="flex-1">
-                                                            <p className={`text-[10px] font-black uppercase tracking-widest ${idx < starPhase ? 'text-emerald-600' :
-                                                                idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
+                                                            {coachingMode === 'star' && (
+                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
+                                                                    idx < starPhase ? 'text-emerald-600' :
+                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
                                                                 }`}>
-                                                                {STAR_LABELS[idx]}
-                                                            </p>
-                                                            <p className={`text-[11px] font-medium leading-tight mt-0.5 ${idx === starPhase ? 'text-slate-900' : 'text-slate-400'
-                                                                }`}>
+                                                                    {STAR_LABELS[idx]}
+                                                                </p>
+                                                            )}
+                                                            <p className={`text-[11px] font-medium leading-tight mt-0.5 ${
+                                                                idx === starPhase ? 'text-slate-900' : 'text-slate-400'
+                                                            }`}>
                                                                 {req.text}
                                                             </p>
                                                         </div>
