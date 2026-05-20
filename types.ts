@@ -103,6 +103,16 @@ export interface AuditResult {
   };
 }
 
+// ─── Framework Evaluation Types — DMGT-AMO-ZPD-DCT ──────────────────
+export type CompetencyDemonstrationLevel = 'Emerging' | 'Developing' | 'Established' | 'Advanced';
+
+export interface AmoReadiness {
+  ability: 'high' | 'moderate' | 'low';
+  motivation: 'high' | 'moderate' | 'low';
+  opportunity: 'high' | 'moderate' | 'low';
+  amo_note: string;
+}
+
 export type TimerDisplay = 'progressBar' | 'countdown' | 'elapsed' | 'pacingAnchor';
 export type TimerFramingCondition = 'elapsed' | 'duration' | 'used';
 export type VisualFeedbackStyle = 'minimalist' | 'gentle' | 'textOnly';
@@ -133,7 +143,9 @@ export type AnalyticsEventType =
   | 'session_start' | 'session_exit' | 'phase_complete' | 'break_start'
   | 'break_end' | 'integrity_warning' | 'sandbox_engaged' | 'promo_generated'
   | 'session_complete' | 'feedback_generated' | 'intent_survey_submitted'
-  | 'scaffold_toggled' | 'data_synced' | 'data_exported';
+  | 'scaffold_toggled' | 'data_synced' | 'data_exported'
+  | 'feedback_report_opened' | 'practice_task_noted'
+  | 'cv_uploaded' | 'questions_generated' | 'profile_submitted';
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
@@ -141,6 +153,13 @@ export interface AnalyticsEvent {
   participantId: string;
   condition: ExperimentCondition;
   metadata?: Record<string, any>;
+}
+
+export interface CandidateProfile {
+  experience: 'novice' | 'some' | 'experienced' | 'expert';
+  feedbackLiteracy: 'absorbs' | 'reflects' | 'overwhelmed' | 'uncertain';
+  regulatoryFocus: 'promotion' | 'prevention' | 'mixed' | 'unclear';
+  anxietyLevel: 'low' | 'mild' | 'moderate' | 'high';
 }
 
 export interface LiveTools {
@@ -481,24 +500,38 @@ export interface ProbeAnalysis {
     detected: boolean;
     evidence: string | null;
   };
+
+  // DMGT-AMO-ZPD-DCT Framework signals (additive — all optional for backward compat)
+  competency_demonstration_level?: CompetencyDemonstrationLevel;
+  competency_demonstration_descriptor?: string;
+  amo_readiness?: AmoReadiness;
+  zpd_boundary_type?: 'act_one' | 'probed';
 }
 
 export interface QuestionSummaryReport {
   questionId: string;
   questionText: string;
-  answerOverview: string; // Section 1
-  strengths: string[];    // Section 2
-  developmentPoints: {    // Section 3
+  answerOverview: string;
+  strengths: string[];
+  developmentPoints: {
     gap: string;
     whyItMatters: string;
     instruction: string;
   }[];
-  probeEngagement: string; // Section 4
-  probeCorrelation: string; // Section 5: How probe connects back to Act 1
-  integratedCoaching: string; // Section 6: Guidance for effective expansion
-  practiceTask: string;   // Section 7: One Thing to Practice
+  probeEngagement: string;
+  probeCorrelation: string;
+  integratedCoaching: string;
+  practiceTask: string;
   timestamp: number;
   allProbeAnalyses?: ProbeAnalysis[];
+
+  // Five-Component Feedback Sequence (DMGT-AMO-ZPD-DCT framework)
+  selfAssessmentPrompt?: string;           // Component 1: Boud & Molloy
+  calibrationNote?: string;                // Component 2: Hattie + PsyCap Efficacy
+  competencyDemonstrationLevel?: CompetencyDemonstrationLevel; // Component 3a
+  competencyDemonstrationDescriptor?: string;                  // Component 3b
+  forwardOrientation?: string;             // Component 5: Career Adaptability + PsyCap Hope
+  cvAlignmentNote?: string;               // CV cross-reference: what their background reveals about their answer
 }
 
 export interface QuestionDataAccumulator {
@@ -560,11 +593,14 @@ export interface Question {
   keywords: string[];
   requirements: Requirement[];
   difficulty?: 'easy' | 'medium' | 'hard';
-  questionType?: 'behavioural' | 'motivational' | 'situational';
+  questionType?: 'behavioural' | 'motivational' | 'situational' | 'knowledge-probe';
+  competency?: string;                 // which of the 50 competencies this assesses
+  excellenceBenchmark?: string;        // what an exceptional answer demonstrates (2 sentences)
+  discriminantSignals?: string[];      // 2–3 signals that separate good from exceptional
 }
 
 export interface JDCVAlignmentAnalysis {
-  matchScore: number;                          // 0–100
+  matchScore?: number;                         // deprecated — UI derives fit label from experienceAlignment instead
   alignmentSummary: string;                    // 2-3 sentence overview
   strengthAreas: Array<{
     area: string;                              // e.g. "Project Management"

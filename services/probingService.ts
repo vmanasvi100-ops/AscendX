@@ -13,13 +13,14 @@ export interface GenerateProbeParams {
   companyName: string;
   cvSummary: string;
   jobDescription: string;
-  currentQuestion: { text: string; type: string; difficulty?: string };
+  currentQuestion: { text: string; type: string; difficulty?: string; competency?: string; excellenceBenchmark?: string; discriminantSignals?: string[] };
   sessionPhaseIndex: number;
   questionsAnsweredCount: number;
   priorProbesThisQuestion: string;
   candidateAnswer: string;
   conversationHistory: string;
   cumulativeTranscript?: string;
+  candidateProfile?: { experience: string; feedbackLiteracy: string; regulatoryFocus: string; anxietyLevel: string } | null;
 }
 
 export const generateProbe = async (params: GenerateProbeParams): Promise<Probe> => {
@@ -78,14 +79,15 @@ CORE PROBING PRINCIPLES — NEVER VIOLATE THESE
    Never engage the off-topic content — redirect professionally.
 
  ═══════════════════════════════════════════════════════════════════
- ZPD SCAFFOLD MODULATION — Vygotsky (1978) / Wood et al. (1976)
+ SCAFFOLD MODULATION — Wood, Bruner & Ross (1976)
  ═══════════════════════════════════════════════════════════════════
 
-You will receive session_phase_index and question_difficulty_level in the context.
-Modulate your probe intensity accordingly:
+Scaffolding principle: match support level to the candidate's current independent
+performance boundary (Zone of Proximal Development lower boundary).
+Gradually withdraw support as competence increases within the session.
 
 PHASE 1 — Introductory Alignment (session_phase_index 0–2, difficulty: EASY)
-  Zone of Proximal Development: Maximum scaffold. Candidate is warming up.
+  Lower boundary: candidate is at baseline — maximum scaffold provided.
   → Use supportive, structured language with no ambiguity
   → Offer structural hints if answer was incomplete:
       'You described the situation well — what was your specific role in the action?'
@@ -94,7 +96,7 @@ PHASE 1 — Introductory Alignment (session_phase_index 0–2, difficulty: EASY)
   → Rationale MUST be detailed and warm
 
 PHASE 2 — Core Competency (session_phase_index 3–6, difficulty: MEDIUM)
-  Zone of Proximal Development: Moderate scaffold. Building independence.
+  Lower boundary rising — moderate scaffold, building independence.
   → Reference candidate's language as always
   → Probe the gap between claim and evidence directly
   → Introduce mild abstraction: 'What would you do differently now?'
@@ -102,7 +104,7 @@ PHASE 2 — Core Competency (session_phase_index 3–6, difficulty: MEDIUM)
   → Rationale present but briefer
 
 PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
-  Zone of Proximal Development: Minimal scaffold. Independent performance.
+  Lower boundary near upper — minimal scaffold, independent performance.
   → Ask for systemic thinking: 'How would you scale this approach organisation-wide?'
   → Challenge assumptions: 'What would a critic of that approach say?'
   → Demand abstract reasoning: 'What does this experience reveal about how you lead?'
@@ -138,8 +140,15 @@ PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
       Question Difficulty: ${params.currentQuestion.difficulty}
       Questions Answered So Far: ${params.questionsAnsweredCount}
       Prior Probes This Question: ${params.priorProbesThisQuestion}
+      ${params.currentQuestion.competency ? `Competency Being Assessed: ${params.currentQuestion.competency}` : ''}
+      ${params.currentQuestion.excellenceBenchmark ? `Excellence Benchmark (what Level 5 looks like): ${params.currentQuestion.excellenceBenchmark}` : ''}
+      ${params.currentQuestion.discriminantSignals?.length ? `Discriminant Signals (what separates good from exceptional — target these in your probe):\n      ${params.currentQuestion.discriminantSignals.map((s, i) => `${i + 1}. ${s}`).join('\n      ')}` : ''}
 
 
+
+      ADAPTIVE PROFILE MODIFIERS (apply to tone and rationale only — never change phase difficulty):
+      ${params.candidateProfile ? `Experience: ${params.candidateProfile.experience} | Feedback literacy: ${params.candidateProfile.feedbackLiteracy} | Regulatory focus: ${params.candidateProfile.regulatoryFocus} | Anxiety level: ${params.candidateProfile.anxietyLevel}
+      — novice/high-anxiety: warmer, longer rationale; overwhelmed/uncertain: simpler language; promotion: frame as building on strengths; prevention: frame as avoiding gaps.` : 'No profile provided — use defaults.'}
 
       CANDIDATE'S CURRENT ANSWER / CUMULATIVE TRANSCRIPT:
       ${params.cumulativeTranscript || params.candidateAnswer}
@@ -231,34 +240,31 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
    Assess what parts of the STAR framework the candidate has covered so far.
    star_status: { situation, task, action, result } (complete | partial | missing | not_yet_required)
 
-3. SDT MERIT VECTORS (0-100)
-   Score the candidate's language CURRENTLY in this response only.
-   autonomy: Ownership/initiation language.
-   competence: Evidence of skills/ability.
-   relatedness: Impact on others/teamwork.
+3. OWNERSHIP LANGUAGE DENSITY (0-100)
+   Score the density of ownership and agency language in this response only.
+   autonomy: Degree of personal initiative and ownership language ("I decided", "I drove", "I took responsibility").
+   competence: Degree of specific skill execution language ("I built", "I designed", "I resolved").
+   relatedness: Degree of collaborative impact language ("the team achieved", "I enabled", "stakeholders responded").
+   These are internal coaching signals — never expose the labels or scores to the candidate.
 
-4. GOFFMAN SCORES (0-100)
-   front_stage: Polished, professional, 'ideal' self-presentation.
-   back_stage: Authentic, vulnerable, 'real' self-presentation.
+4. PRESENTATION AUTHENTICITY SIGNAL (0-100)
+   front_stage: Degree of polished, professional self-presentation — carefully curated, ideal-self language.
+   back_stage: Degree of authentic, genuine experience — personal, unguarded, specific to them.
+   Balance matters: high front_stage with low back_stage = over-prepared or insincere impression.
+   Internal signal only — never describe as "Goffman" or "impression management" to the candidate.
 
-5. CHC COGNITIVE SIGNALS
-   gc: Crystallized intelligence (vocabulary/domain knowledge).
-   gf: Fluid reasoning (adaptive logic/problem solving).
-   gq: Quantitative/technical evidence.
-   lowest_signal: 'gc' | 'gf' | 'gq'.
+5. RESPONSE QUALITY SIGNALS
+   domain_language: 'strong' | 'moderate' | 'weak' — use of specific, accurate professional vocabulary.
+   adaptive_reasoning: 'strong' | 'moderate' | 'weak' — logical flow and problem-solving quality.
+   evidence_specificity: 'strong' | 'moderate' | 'weak' — use of concrete data, metrics, or named outcomes.
+   lowest_signal: 'domain_language' | 'adaptive_reasoning' | 'evidence_specificity'
+   Map to output fields: gc → domain_language, gf → adaptive_reasoning, gq → evidence_specificity.
 
-6. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
-   Score authenticity vs. impression management across three dimensions:
-   - Voice: Did they say something personal and genuine not already in their CV?
-   - Motivation: Did they give a real personal reason for wanting this role, not from job description?
-   - Explanation: Did they go further than the question asked, explaining why and what they learned?
-   
-   Each dimension receives an orientation: 'self_verifying' | 'impression_managing' | 'balanced'.
-   Identify which dimension shows the strongest self-verification pattern.
-   pj_observations: Max 2 plain English observations. Must reference specific candidate quotes. Use human terms, skip theoretical language.
-   NEVER mention 'Procedural Justice' or Cable & Kay theory names in the observations.
-   Instead, describe what you observed directly: 'You stayed very close to your CV language' or 'That felt like something you actually care about.'
-   Example: "'I want to make an impact' — tell me specifically what kind of impact and why that matters to you personally, not just for the company." (No jargon)
+6. AUTHENTICITY OBSERVATIONS
+   pj_observations: Max 2 plain English observations. Must reference specific candidate quotes.
+   Describe what you observed directly — no theoretical language.
+   Examples: 'You stayed very close to your CV language here — the real story is often richer.'
+             "'I want to make an impact' — what kind specifically, and why does that matter to you personally?"
 
 7. SCAFFOLD & NOVELTY
    scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent'
@@ -269,13 +275,29 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
 
 9. COACHING RECOMMENDATION (Real-time Support)
    coaching_guidance: A structured object containing:
-     - framework_gap: The specific framework signal that triggered the coaching (e.g., "Autonomy (SDT)").
+     - framework_gap: Name the STAR component or evidence type that needs work (e.g., "Missing Result", "Weak ownership language").
      - instruction: Detailed, actionable instruction on how to rephrase or expand.
-     - example_phrase: A "Try saying..." template tailored to the candidate's context.
+     - example_phrase: A "Try saying..." template tailored to the candidate's specific words.
      - priority: 'high' | 'medium' | 'low'.
    coaching_tip: A single-sentence summary of the instruction.
-   Must be grounded in the STAR framework and the specific vectors identified.
-   CRITICAL: ALWAYS use layman's terms. Never mention psychological theories.
+   CRITICAL: ALWAYS use layman's terms. Never mention psychological theories, scores, or framework names.
+
+10. COMPETENCY DEMONSTRATION LEVEL
+    Assign ONE level based on the full evidence in this response:
+    'Emerging': Situation/Task referenced but Action/Result missing or too vague to assess.
+    'Developing': STAR partially complete; some behavioural evidence but outcome unclear or unspecified.
+    'Established': Full STAR with clear behavioural evidence and a describable/measurable result.
+    'Advanced': Unprompted multi-layered evidence, cross-contextual application, spontaneous reflection.
+    competency_demonstration_descriptor: 2 sentences max. What specifically did they demonstrate?
+    Use their own words where possible. Behavioural language only — no labels, no scores.
+
+11. AMO READINESS SIGNAL
+    Assess the three conditions required for performance (Ability × Motivation × Opportunity):
+    ability: 'high' | 'moderate' | 'low' — does evidence show the candidate has the skill?
+    motivation: 'high' | 'moderate' | 'low' — does language show genuine interest in this role/context?
+    opportunity: 'high' | 'moderate' | 'low' — did the response flow easily, or did hesitation/clarification suggest conditions blocked performance?
+    amo_note: 1 sentence. If any dimension is 'low', name why — this contextualises weak performance without blaming the candidate.
+    Internal coaching signal only — never expose AMO labels to the candidate.
    Return JSON only — no preamble, no markdown. `
         }]
       }
@@ -363,13 +385,31 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
               evidence: { type: Type.STRING, nullable: true }
             },
             required: ["detected", "evidence"]
+          },
+
+          // DMGT-AMO-ZPD-DCT Framework signals
+          competency_demonstration_level: {
+            type: Type.STRING,
+            enum: ['Emerging', 'Developing', 'Established', 'Advanced']
+          },
+          competency_demonstration_descriptor: { type: Type.STRING },
+          amo_readiness: {
+            type: Type.OBJECT,
+            properties: {
+              ability:     { type: Type.STRING, enum: ['high', 'moderate', 'low'] },
+              motivation:  { type: Type.STRING, enum: ['high', 'moderate', 'low'] },
+              opportunity: { type: Type.STRING, enum: ['high', 'moderate', 'low'] },
+              amo_note:    { type: Type.STRING }
+            },
+            required: ["ability", "motivation", "opportunity", "amo_note"]
           }
         },
         required: [
           "probe_successful", "depth_delta", "evidence_added", "star_status", "weakest_star_component",
           "contextual_anchor", "suggested_next_probe_type", "sdt_signals", "scaffold_dependency_signal",
           "interpretation", "pj_observations", "novel_claim_introduced", "proceed", "reason", "coaching_tip",
-          "merit_vectors", "goffman_scores", "chc_signals", "algorithmic_aversion"
+          "merit_vectors", "goffman_scores", "chc_signals", "algorithmic_aversion",
+          "competency_demonstration_level", "competency_demonstration_descriptor", "amo_readiness"
         ]
       }
     }
@@ -382,6 +422,8 @@ export interface GenerateQuestionSummaryParams {
   accumulator: QuestionDataAccumulator;
   targetRole: string;
   companyName: string;
+  cvSummary?: string;
+  jobDescription?: string;
 }
 
 export const generateQuestionSummary = async (params: GenerateQuestionSummaryParams): Promise<QuestionSummaryReport> => {
@@ -425,8 +467,9 @@ export const generateQuestionSummary = async (params: GenerateQuestionSummaryPar
         {
           role: 'user',
           parts: [{
-            text: `You are AscendX, an expert AI interview coach. 
-Generate a comprehensive STAR Analysis Report for the following candidate response to a specific interview question.
+            text: `You are AscendX, an expert AI interview coach.
+Generate a structured coaching report following the Five-Component Feedback Sequence.
+Use plain English throughout. Never name psychological theories, scores, or framework labels.
 
 CONTEXT:
 Target Role: ${params.targetRole}
@@ -436,6 +479,8 @@ Transcript: ${params.accumulator.transcript}
 Timer Framing: ${timerFramingCondition}
 Act One Duration: ${responseDurations.actOne}s
 Probe Durations: ${responseDurations.probes.join(', ')}s
+${params.cvSummary ? `Candidate CV Summary: ${params.cvSummary.slice(0, 1500)}` : ''}
+${params.jobDescription ? `Job Description: ${params.jobDescription.slice(0, 1000)}` : ''}
 
 DATA SIGNALS (Phase Analyses):
 ${JSON.stringify(params.accumulator.phaseAnalyses, null, 2)}
@@ -444,32 +489,71 @@ DATA SIGNALS (Probe Analyses):
 ${JSON.stringify(params.accumulator.probeAnalyses, null, 2)}
 
 ═══════════════════════════════════════════════════════════════════
-REPORT STRUCTURE — FIVE SECTIONS (Plain English, No Jargon, High Impact)
+FIVE-COMPONENT FEEDBACK SEQUENCE — COMPLETE ALL FIVE
 ═══════════════════════════════════════════════════════════════════
 
-Section 1 — Your Answer Overview
-2-3 sentence description of STAR coverage and overall arc.
+COMPONENT 1 — SELF-ASSESSMENT PROMPT
+Write a single reflective question the candidate should ask themselves BEFORE reading the coaching.
+Activate self-awareness about THIS specific response — not a generic question.
+Start with "Before you read the coaching below," — 1-2 sentences total.
+Output field: selfAssessmentPrompt
 
-Section 2 — What You Did Well
-2-4 specific strengths based on highest-performing SDT/PJ signals. Reference specific quotes.
+COMPONENT 2 — CALIBRATION
+2-3 sentences that validate where the candidate likely assessed themselves accurately,
+and gently reframe where they may have over or underestimated.
+Maintain positive efficacy without inflating it. Reference specific evidence from the transcript.
+TONE: Honest, warm, forward-looking. No scoring language.
+Output field: calibrationNote
 
-Section 3 — Where to Go Deeper
-2-3 specific development points based on weak signals (CHC, SDT, PJ). Include Gap, Why it matters, and Concrete Instruction.
+COMPONENT 3 — COMPETENCY DEMONSTRATION
+3a. Assign ONE level based on all evidence:
+  'Emerging': Situation/Task referenced but Action/Result missing or too vague.
+  'Developing': STAR partially complete; some behavioural evidence but outcome unclear.
+  'Established': Full STAR with clear behavioural evidence and a describable result.
+  'Advanced': Multi-layered STAR, unprompted reflection, cross-contextual application.
+Output field: competencyDemonstrationLevel
 
-Section 4 — Your Probe Engagement
-Paragraph on how the candidate handled probes (Scaffolded Learning/Goffman).
-CRITICAL: This section MUST start with this EXACT sentence: "${timerNote}"
+3b. Write 2-3 sentences describing what they demonstrated, using THEIR OWN words/phrases.
+Behavioural language only — cite specific evidence, then name what it shows.
+Output field: competencyDemonstrationDescriptor
 
- Section 5 — Act-Probe Correlation
-Explain how the probe addressed a specific gap in the initial STAR response. (e.g., "The probe caught a missing 'Result' signal in your Act 1, forcing a strategic shift to evidence-based claims.")
+Also produce:
+answerOverview: 2-3 sentence arc of STAR coverage overall (for the report header).
+strengths: 2-4 specific strengths with evidence references from the transcript.
 
-Section 6 — Integrated Excellence Guidance
-Provide a 2-sentence instruction on how to make the combined response (Act + Probe) more effective in a single delivery next time.
+COMPONENT 4 — PROCESS COACHING (STAR gap targeting)
+Identify the primary STAR gap and up to 2 supporting gaps. For each:
+  gap: Name the STAR component or evidence type that was weakest.
+  whyItMatters: 1 sentence — why this gap costs the candidate in a real interview.
+  instruction: Specific, actionable — what to do differently. Include "Try saying..." where useful.
+Output field: developmentPoints (array of up to 3)
 
-Section 7 — One Thing to Practise
-Single prioritized instruction for next time based on the weakest overall signal.
+Also produce:
+probeEngagement: How the candidate engaged with follow-up probes — what they added and how.
+${timerNote ? `CRITICAL: probeEngagement MUST start with this exact sentence: "${timerNote}"` : ''}
+probeCorrelation: How the probe addressed a specific gap in the initial STAR response.
+integratedCoaching: 2-sentence instruction on making the combined Act+Probe response work in one delivery.
+practiceTask: Single prioritised instruction for next time — the highest-leverage change.
 
-Return JSON only — no preamble, no markdown. Use the following schema.`
+COMPONENT 5 — FORWARD ORIENTATION
+2-3 sentences that:
+- Name the competency behaviour being developed (not the label, the behaviour)
+- Frame it as a learnable trajectory (DMGT development framing — natural ability → skill through practice)
+- End with ONE specific action for next time
+TONE: Motivating, concrete, future-facing. NOT a deficit summary.
+Output field: forwardOrientation
+
+${params.cvSummary ? `CV ALIGNMENT NOTE (include only if CV was provided)
+Cross-reference the candidate's full answer against their CV background and the job description.
+- Did they use their strongest relevant experience, or did they reach for a weaker example?
+- Did they undersell or overclaim relative to what their CV actually shows?
+- Is there a specific role, project, or skill in their CV that would have been stronger evidence here?
+- Does their answer language match what the JD is asking for?
+Write 2-3 sentences. Reference specific CV details by name where possible. Be direct but constructive.
+If their answer was well-aligned with their background, confirm that — it is useful feedback too.
+Output field: cvAlignmentNote` : ''}
+
+Return JSON only — no preamble, no markdown.`
           }]
         }
       ],
@@ -478,6 +562,13 @@ Return JSON only — no preamble, no markdown. Use the following schema.`
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            selfAssessmentPrompt: { type: Type.STRING },
+            calibrationNote: { type: Type.STRING },
+            competencyDemonstrationLevel: {
+              type: Type.STRING,
+              enum: ['Emerging', 'Developing', 'Established', 'Advanced']
+            },
+            competencyDemonstrationDescriptor: { type: Type.STRING },
             answerOverview: { type: Type.STRING },
             strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
             developmentPoints: {
@@ -495,9 +586,17 @@ Return JSON only — no preamble, no markdown. Use the following schema.`
             probeEngagement: { type: Type.STRING },
             probeCorrelation: { type: Type.STRING },
             integratedCoaching: { type: Type.STRING },
-            practiceTask: { type: Type.STRING }
+            practiceTask: { type: Type.STRING },
+            forwardOrientation: { type: Type.STRING },
+            cvAlignmentNote: { type: Type.STRING, nullable: true }
           },
-          required: ["answerOverview", "strengths", "developmentPoints", "probeEngagement", "probeCorrelation", "integratedCoaching", "practiceTask"]
+          required: [
+            "selfAssessmentPrompt", "calibrationNote",
+            "competencyDemonstrationLevel", "competencyDemonstrationDescriptor",
+            "answerOverview", "strengths", "developmentPoints",
+            "probeEngagement", "probeCorrelation", "integratedCoaching",
+            "practiceTask", "forwardOrientation"
+          ]
         }
       }
     });
@@ -507,7 +606,13 @@ Return JSON only — no preamble, no markdown. Use the following schema.`
       ...parsed,
       questionId: params.accumulator.questionId,
       questionText: params.accumulator.questionId,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      selfAssessmentPrompt: parsed.selfAssessmentPrompt,
+      calibrationNote: parsed.calibrationNote,
+      competencyDemonstrationLevel: parsed.competencyDemonstrationLevel,
+      competencyDemonstrationDescriptor: parsed.competencyDemonstrationDescriptor,
+      forwardOrientation: parsed.forwardOrientation,
+      cvAlignmentNote: parsed.cvAlignmentNote ?? null,
     } as QuestionSummaryReport;
   } catch (err) {
     console.error("Failed to generate question summary:", err);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Target, ShieldCheck, Sparkles, Brain, Activity, MessageSquare, ShieldAlert, Award, Printer, X, BookOpen, TrendingUp, Lightbulb } from 'lucide-react';
+import { Target, ShieldCheck, Brain, Activity, MessageSquare, Award, Printer, X, BookOpen, TrendingUp, Lightbulb, FileText, ArrowUpRight, Sparkles } from 'lucide-react';
 import { QuestionSummaryReport, ProbeAnalysis } from '../types';
 
 interface QuestionReportProps {
@@ -96,6 +96,55 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
                 <p className="text-sm font-medium text-slate-200 leading-relaxed">{sr.answerOverview}</p>
               </div>
             </div>
+
+            {/* Competency Demonstration Level */}
+            {sr.competencyDemonstrationLevel && (() => {
+              const levelConfig = {
+                Emerging:    { bg: 'bg-slate-100',   border: 'border-slate-300',   text: 'text-slate-700',   dot: 'bg-slate-400'   },
+                Developing:  { bg: 'bg-amber-50',    border: 'border-amber-300',   text: 'text-amber-800',   dot: 'bg-amber-500'   },
+                Established: { bg: 'bg-emerald-50',  border: 'border-emerald-400', text: 'text-emerald-800', dot: 'bg-emerald-500' },
+                Advanced:    { bg: 'bg-indigo-50',   border: 'border-indigo-400',  text: 'text-indigo-800',  dot: 'bg-indigo-500'  },
+              }[sr.competencyDemonstrationLevel];
+              return (
+                <div className={`p-6 rounded-3xl border-2 ${levelConfig.bg} ${levelConfig.border} flex items-start gap-5`}>
+                  <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${levelConfig.dot}`} />
+                  <div>
+                    <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${levelConfig.text}`}>
+                      Competency Demonstration — {sr.competencyDemonstrationLevel}
+                    </p>
+                    <p className={`text-sm font-medium leading-relaxed ${levelConfig.text}`}>
+                      {sr.competencyDemonstrationDescriptor}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Self-Assessment Prompt */}
+            {sr.selfAssessmentPrompt && (
+              <div className="p-6 bg-white border-2 border-indigo-100 rounded-3xl flex items-start gap-4">
+                <div className="p-2 bg-indigo-100 rounded-xl shrink-0">
+                  <Brain size={18} className="text-indigo-600" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Reflect First</p>
+                  <p className="text-sm font-medium text-slate-700 leading-relaxed italic">{sr.selfAssessmentPrompt}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Calibration Note */}
+            {sr.calibrationNote && (
+              <div className="p-6 bg-white border-2 border-slate-100 rounded-3xl flex items-start gap-4 shadow-sm">
+                <div className="p-2 bg-slate-100 rounded-xl shrink-0">
+                  <Sparkles size={18} className="text-slate-500" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Calibration</p>
+                  <p className="text-sm font-medium text-slate-700 leading-relaxed">{sr.calibrationNote}</p>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Section 2: STAR Performance */}
@@ -164,11 +213,25 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
             </div>
           </section>
 
+          {/* CV Alignment Note */}
+          {sr.cvAlignmentNote && (
+            <section className="space-y-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center gap-2">
+                <FileText size={16} className="text-indigo-600" />
+                4. Your Background & This Answer
+              </h3>
+              <div className="p-6 bg-indigo-50 border-2 border-indigo-100 rounded-3xl flex items-start gap-4">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-2 shrink-0" />
+                <p className="text-sm font-medium text-slate-700 leading-relaxed">{sr.cvAlignmentNote}</p>
+              </div>
+            </section>
+          )}
+
           {/* Section 5: Probe Engagement */}
           <section className="space-y-6">
             <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
               <MessageSquare size={16} />
-              4. Probe Engagement & Correlation
+              {sr.cvAlignmentNote ? '5.' : '4.'} Probe Engagement & Correlation
             </h3>
             <div className="space-y-4">
               <div className="p-6 bg-white border-2 border-slate-100 rounded-3xl shadow-sm">
@@ -195,47 +258,45 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
               </h3>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* SDT Merit Vectors */}
+                {/* Ownership Language Signals — no scores shown */}
                 <div className="space-y-4">
                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ownership & Impact Signals</h4>
-                  <div className="space-y-6">
-                    {Object.entries(pa.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => (
-                      <div key={vector} className="space-y-2">
-                        <div className="flex justify-between items-end">
+                  <div className="space-y-4">
+                    {Object.entries(pa.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => {
+                      const numScore = score as number;
+                      const strength = numScore >= 66 ? 'strong' : numScore >= 33 ? 'developing' : 'low';
+                      const isWeakest = pa.merit_vectors.lowest_vector === vector;
+                      return (
+                        <div key={vector} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
                           <div className="flex flex-col">
                             <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
                               {vector === 'autonomy' ? 'Ownership & Agency' : vector === 'competence' ? 'Skill Mastery' : 'Team Impact'}
                             </span>
-                            <span className="text-[9px] font-bold text-slate-400 italic">
-                              {vector === 'autonomy' ? 'Recruiters value personal drive and ownership.' : vector === 'competence' ? 'Recruiters look for specific execution ability.' : 'Recruiters value collaborative business impact.'}
-                            </span>
+                            <p className="text-[10px] font-bold text-slate-500">
+                              {vector === 'autonomy' ? 'Personal drive and initiative language.' : vector === 'competence' ? 'Specific execution and skill evidence.' : 'Collaborative and business impact language.'}
+                            </p>
                           </div>
-                          <span className="text-xs font-black text-indigo-600">{score as number}/100</span>
+                          <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${isWeakest ? 'bg-amber-100 text-amber-700' : strength === 'strong' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {isWeakest ? 'develop' : strength}
+                          </span>
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${score}%` }}
-                            className={`h-full ${pa.merit_vectors.lowest_vector === vector ? 'bg-amber-500' : 'bg-indigo-600'}`}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* CHC Cognitive Signals */}
+                {/* Response Quality Signals */}
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Thinking Styles & Precision</h4>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Response Quality Signals</h4>
                   <div className="space-y-4">
                     {Object.entries(pa.chc_signals).filter(([k]) => k !== 'lowest_signal').map(([signal, level]) => (
                       <div key={signal} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
                         <div className="flex flex-col">
                           <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                            {signal === 'gc' ? 'Professional Expertise' : signal === 'gf' ? 'Strategic Thinking' : 'Evaluation & Precision'}
+                            {signal === 'gc' ? 'Professional Vocabulary' : signal === 'gf' ? 'Logical Reasoning' : 'Evidence & Precision'}
                           </span>
                           <p className="text-[10px] font-bold text-slate-800">
-                            {signal === 'gc' ? 'How clearly you use industry-specific details.' : signal === 'gf' ? 'Your logic flow in complex or new situations.' : 'Your use of data and metrics for evidence.'}
+                            {signal === 'gc' ? 'Specific, accurate professional language.' : signal === 'gf' ? 'Logic flow in complex or novel situations.' : 'Concrete data, metrics, or named outcomes.'}
                           </p>
                         </div>
                         <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' : level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -306,11 +367,24 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
             </section>
           )}
 
-          {/* Section 7: One Thing to Practise */}
+          {/* Forward Orientation */}
+          {sr.forwardOrientation && (
+            <section className="space-y-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
+                <ArrowUpRight size={16} />
+                {pa ? '7.' : '6.'} Where This Takes You
+              </h3>
+              <div className="p-8 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-[40px] shadow-xl">
+                <p className="text-lg font-medium leading-relaxed">{sr.forwardOrientation}</p>
+              </div>
+            </section>
+          )}
+
+          {/* One Thing to Practise */}
           <section className="space-y-6">
             <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-100 pb-2 flex items-center gap-2">
               <Lightbulb size={16} />
-              {pa ? '6.' : '5.'} One Thing to Practise
+              {pa ? (sr.forwardOrientation ? '8.' : '7.') : (sr.forwardOrientation ? '7.' : '6.')} One Thing to Practise
             </h3>
             <div className="p-8 bg-slate-900 text-white rounded-[40px] shadow-xl">
               <div className="flex items-start gap-4">

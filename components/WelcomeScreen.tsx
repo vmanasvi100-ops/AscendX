@@ -97,7 +97,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
     } = useSettings();
 
     const [preSessionAnswer, setPreSessionAnswer] = useState<string | null>(null);
+    const [priorSessionHint, setPriorSessionHint] = useState<string | null>(null);
 
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem('ascend_session_history');
+            if (raw) {
+                const history: Array<{ date: string; hint: string }> = JSON.parse(raw);
+                if (history.length > 0) setPriorSessionHint(history[0].hint);
+            }
+        } catch { /* ignore */ }
+    }, []);
 
     const [isHoverAudioActive, setIsHoverAudioActive] = useState(false);
     const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -366,6 +376,14 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                     </div>
                 ) : (
                     <form onSubmit={handleStart} className="p-8 border-t border-slate-200 animate-fade-in">
+                        {priorSessionHint && (
+                            <div className="mb-8 p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex items-start gap-3">
+                                <div className="w-2 h-2 mt-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                                <p className="text-sm text-indigo-900">
+                                    <span className="font-bold">From your last session:</span> {priorSessionHint} — something to focus on today.
+                                </p>
+                            </div>
+                        )}
                         <div id="welcome-audio-cues" className="mb-10 p-6 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-6">
                             <div>
                                 <h2 className="text-lg font-semibold text-slate-800 flex items-center" onMouseEnter={handleAudioActivationHover} onMouseLeave={cancelSpeech}>Welcome Screen Audio Guide <SpeakerIcon /></h2>

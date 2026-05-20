@@ -16,6 +16,7 @@ export interface GenerateFeedbackParams {
   companyName: string;
   condition: 'scaffolded' | 'standard' | 'minimal';
   phaseProgression: string;
+  candidateProfile?: { experience: string; feedbackLiteracy: string; regulatoryFocus: string; anxietyLevel: string } | null;
 }
 
 export const generateDetailedFeedback = async (
@@ -61,6 +62,7 @@ Job Requirements:          ${params.jobRequirements}
 Candidate CV:              ${params.cvText || 'Not provided.'}
 Interview Transcript:      ${params.transcript}
 Probing Pipeline Analysis: ${params.probeAnalysis || 'Not available.'}
+Adaptive Profile:          ${params.candidateProfile ? `experience=${params.candidateProfile.experience}, feedbackLiteracy=${params.candidateProfile.feedbackLiteracy}, regulatoryFocus=${params.candidateProfile.regulatoryFocus}, anxietyLevel=${params.candidateProfile.anxietyLevel} — adjust Layer A tone: overwhelmed/uncertain→max 3 suggestions; promotion→frame as opportunities; prevention→frame as corrections; high anxiety→open with a genuine strength, no negative openers.` : 'Not provided — use defaults.'}
 
 ═══════════════════════════════════════════════════════
 STEP 0 — GENERATE LAYER B SCORES FIRST

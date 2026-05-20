@@ -3,8 +3,13 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-
 import fs from "fs";
+
+import { runMigrations } from "./backend/db/migrate.js";
+import { startRetentionScheduler } from "./backend/lib/retention.js";
+import consentRoutes from "./backend/routes/consent.js";
+import sessionRoutes from "./backend/routes/sessions.js";
+import flagRoutes from "./backend/routes/flags.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,13 +20,21 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' })); // CV + JD text can be large
+
+  // ── Backend API routes ─────────────────────────────────────────────────────
+  // These are mounted before Vite middleware so they are always intercepted first.
+  // The frontend continues to work independently — these routes are additive only.
+
+  app.use("/api/consent", consentRoutes);
+  app.use("/api/sessions", sessionRoutes);
+  app.use("/api/sessions", flagRoutes);   // /api/sessions/:sessionId/flags
 
   // Health check endpoint
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", (_req, res) => {
     const distPath = path.resolve(__dirname, "dist");
-    res.json({ 
-      status: "ok", 
+    res.json({
+      status: "ok",
       env: process.env.NODE_ENV,
       cwd: process.cwd(),
       distPath,
@@ -46,7 +59,7 @@ async function startServer() {
     app.use(express.static(distPath));
     
     // Fallback for SPA
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       const indexPath = path.resolve(distPath, "index.html");
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
@@ -55,6 +68,21 @@ async function startServer() {
         res.status(404).send("Application build not found. Please ensure 'npm run build' was successful.");
       }
     });
+  }
+
+  // ── Database setup ─────────────────────────────────────────────────────────
+  // Run migrations and start retention scheduler only if DATABASE_URL is set.
+  // If not set, the server starts normally — frontend continues to work as before.
+
+  if (process.env.DATABASE_URL) {
+    try {
+      await runMigrations();
+      startRetentionScheduler();
+    } catch (err) {
+      console.error("[DB] Startup failed — server will run without backend persistence:", err);
+    }
+  } else {
+    console.warn("[DB] DATABASE_URL not set — backend API routes inactive. Frontend unaffected.");
   }
 
   app.listen(PORT, "0.0.0.0", () => {

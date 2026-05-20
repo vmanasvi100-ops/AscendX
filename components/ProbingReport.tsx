@@ -63,20 +63,16 @@ Signal: ${analysis.coaching_guidance?.framework_gap || 'N/A'}
 Instruction: ${analysis.coaching_guidance?.instruction || 'N/A'}
 Try saying: "${analysis.coaching_guidance?.example_phrase || 'N/A'}"
 
-## FRAMEWORK SIGNALS
-### SDT MERIT VECTORS
-- Autonomy: ${analysis.merit_vectors.autonomy}/100
-- Competence: ${analysis.merit_vectors.competence}/100
-- Relatedness: ${analysis.merit_vectors.relatedness}/100
+## LANGUAGE SIGNALS
+### OWNERSHIP & IMPACT
+- Ownership & Agency: ${analysis.merit_vectors.autonomy >= 66 ? 'strong' : analysis.merit_vectors.autonomy >= 33 ? 'developing' : 'low'}
+- Skill Mastery: ${analysis.merit_vectors.competence >= 66 ? 'strong' : analysis.merit_vectors.competence >= 33 ? 'developing' : 'low'}
+- Team Impact: ${analysis.merit_vectors.relatedness >= 66 ? 'strong' : analysis.merit_vectors.relatedness >= 33 ? 'developing' : 'low'}
 
-### CHC COGNITIVE SIGNALS
-- Crystallised (Gc): ${analysis.chc_signals.gc}
-- Fluid (Gf): ${analysis.chc_signals.gf}
-- Quantitative (Gq): ${analysis.chc_signals.gq}
-
-### GOFFMAN PRESENTATION
-- Front Stage: ${analysis.goffman_scores.front_stage}
-- Back Stage: ${analysis.goffman_scores.back_stage}
+### RESPONSE QUALITY
+- Professional Vocabulary: ${analysis.chc_signals.gc}
+- Logical Reasoning: ${analysis.chc_signals.gf}
+- Evidence & Precision: ${analysis.chc_signals.gq}
 
 ## STAR PROGRESSION
 ${Object.entries(analysis.star_status).map(([k, v]) => `- ${k.toUpperCase()}: ${(v as string).replace('_', ' ')}`).join('\n')}
@@ -277,96 +273,53 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
             </h3>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* SDT Merit Vectors */}
+              {/* Ownership Language Signals — strength labels only, no scores */}
               <div className="space-y-4">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ownership & Impact Signals</h4>
-                <div className="space-y-6">
-                  {Object.entries(analysis.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => (
-                    <div key={vector} className="space-y-2">
-                      <div className="flex justify-between items-end">
+                <div className="space-y-4">
+                  {Object.entries(analysis.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => {
+                    const numScore = score as number;
+                    const strength = numScore >= 66 ? 'strong' : numScore >= 33 ? 'developing' : 'low';
+                    const isWeakest = analysis.merit_vectors.lowest_vector === vector;
+                    return (
+                      <div key={vector} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
                         <div className="flex flex-col">
                           <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
-                            {vector === 'autonomy' ? 'Ownership & Agency' :
-                              vector === 'competence' ? 'Skill Mastery' :
-                                'Team Impact'}
+                            {vector === 'autonomy' ? 'Ownership & Agency' : vector === 'competence' ? 'Skill Mastery' : 'Team Impact'}
                           </span>
-                          <span className="text-[9px] font-bold text-slate-400 italic">
-                            {vector === 'autonomy' ? 'Recruiters value personal drive and ownership.' :
-                              vector === 'competence' ? 'Recruiters look for specific execution ability.' :
-                                'Recruiters value collaborative business impact.'}
-                          </span>
+                          <p className="text-[10px] font-bold text-slate-500">
+                            {vector === 'autonomy' ? 'Personal drive and initiative language.' : vector === 'competence' ? 'Specific execution and skill evidence.' : 'Collaborative and business impact language.'}
+                          </p>
                         </div>
-                        <span className="text-xs font-black text-indigo-600">{score as number}/100</span>
+                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${isWeakest ? 'bg-amber-100 text-amber-700' : strength === 'strong' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                          {isWeakest ? 'develop' : strength}
+                        </span>
                       </div>
-                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${score}%` }}
-                          className={`h-full ${analysis.merit_vectors.lowest_vector === vector ? 'bg-amber-500' : 'bg-indigo-600'}`}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* CHC Cognitive Signals */}
+              {/* Response Quality Signals */}
               <div className="space-y-4">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Thinking Styles & Precision</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Response Quality Signals</h4>
                 <div className="space-y-4">
                   {Object.entries(analysis.chc_signals).filter(([k]) => k !== 'lowest_signal').map(([signal, level]) => (
                     <div key={signal} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
                       <div className="flex flex-col">
                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                          {signal === 'gc' ? 'Professional Expertise' :
-                            signal === 'gf' ? 'Strategic Thinking' :
-                              'Evaluation & Precision'}
+                          {signal === 'gc' ? 'Professional Vocabulary' : signal === 'gf' ? 'Logical Reasoning' : 'Evidence & Precision'}
                         </span>
                         <p className="text-[10px] font-bold text-slate-800">
-                          {signal === 'gc' ? 'How clearly you use industry-specific details.' :
-                            signal === 'gf' ? 'Your logic flow in complex or new situations.' :
-                              'Your use of data and metrics for evidence.'}
-                        </p>
-                        <p className="text-[9px] text-indigo-500 font-black uppercase tracking-tighter mt-1">
-                          {signal === 'gc' ? 'Recruiters value: Specific industry anchors' :
-                            signal === 'gf' ? 'Recruiters value: Strong logic transitions' :
-                              'Recruiters value: Quantifiable proof'}
+                          {signal === 'gc' ? 'Specific, accurate professional language.' : signal === 'gf' ? 'Logic flow in complex situations.' : 'Concrete data, metrics, or named outcomes.'}
                         </p>
                       </div>
-                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' :
-                          level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'
-                        }`}>{level as string}</span>
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' : level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {level as string}
+                      </span>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            {/* Goffman Scores */}
-            <div className="p-8 bg-slate-50 rounded-[40px] border-2 border-slate-200">
-              <div className="flex items-center gap-3 mb-6">
-                <Target className="text-indigo-600" />
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900">Authenticity Check: Professional vs. Real</h4>
-              </div>
-              <p className="text-[10px] font-bold text-slate-500 mb-6 italic leading-relaxed">
-                Recruiters look for a balance. They want a "Front Stage" professional persona that is backed up by "Back Stage" genuine experience. If these don't align, you may seem over-prepared or insincere.
-              </p>
-              <div className="relative h-12 bg-white rounded-2xl border border-slate-200 overflow-hidden flex items-center px-4">
-                <div className="absolute inset-0 flex">
-                  <div className="h-full bg-indigo-50/50 flex-1 border-r border-slate-100 flex items-center justify-center">
-                    <span className="text-[9px] font-black uppercase text-indigo-400">Front Stage</span>
-                  </div>
-                  <div className="h-full bg-emerald-50/30 flex-1 flex items-center justify-center">
-                    <span className="text-[9px] font-black uppercase text-emerald-400">Back Stage</span>
-                  </div>
-                </div>
-                <motion.div
-                  initial={{ left: "50%" }}
-                  animate={{ left: `${(analysis.goffman_scores.back_stage / (analysis.goffman_scores.front_stage + analysis.goffman_scores.back_stage)) * 100}%` }}
-                  className="absolute w-8 h-8 -ml-4 bg-indigo-600 rounded-lg shadow-xl border-2 border-white flex items-center justify-center z-10"
-                >
-                  <Activity size={16} className="text-white" />
-                </motion.div>
               </div>
             </div>
           </section>

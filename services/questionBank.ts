@@ -6,14 +6,14 @@ import { Question } from '../types';
 const MOTIVATIONAL_QUESTIONS: Question[] = [
   {
     text: "Tell me about yourself and what brings you here today.",
-    keywords: ["Career Story", "Motivation", "Relevance"],
+    keywords: ["Background", "Unique Value", "Aspiration", "Role Fit"],
     difficulty: "easy",
     questionType: "motivational",
     requirements: [
-      { id: "mot1-1", text: "Opening: Start with where you are now — your current role or most recent experience.", linkedKeywords: ["Career Story"] },
-      { id: "mot1-2", text: "Journey: Briefly trace the path that led you here — key roles, transitions, or a defining moment.", linkedKeywords: ["Career Story"] },
-      { id: "mot1-3", text: "Connection: Explain why this role and company make sense as your next step.", linkedKeywords: ["Motivation"] },
-      { id: "mot1-4", text: "Close: End with one specific thing you're excited to contribute.", linkedKeywords: ["Relevance"] },
+      { id: "mot1-1", text: "Who you are: Ground your answer in your current reality. If you are studying, name your degree, institution, and what drew you to that field. If you are working, state your current or most recent role, the organisation, and the domain you operate in. Be specific — not just a title.", linkedKeywords: ["Background"] },
+      { id: "mot1-2", text: "Your path and skills: Describe the experiences — academic, professional, or project-based — that have shaped your capabilities. Identify the skills you have built and what makes your combination of experiences distinctive. What can you do that most candidates at your level cannot?", linkedKeywords: ["Unique Value"] },
+      { id: "mot1-3", text: "What you are seeking: Be honest about what you want next — growth in a specific area, a shift in domain, deeper responsibility, or exposure to a particular type of work. Vague answers like 'a challenge' or 'growth' do not land. Name the specific thing.", linkedKeywords: ["Aspiration"] },
+      { id: "mot1-4", text: "Why here and why now: Connect your background, skills, and aspiration directly to this role and organisation. Show that this is a deliberate step in your progression — not a default option. End with the specific value you are ready to contribute from day one.", linkedKeywords: ["Role Fit"] },
     ],
   },
   {

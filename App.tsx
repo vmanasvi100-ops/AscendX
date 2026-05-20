@@ -3,12 +3,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AscendPlatform from './components/AscendPlatform';
 import WelcomeScreen from './components/WelcomeScreen';
+import ProfilingScreen from './components/ProfilingScreen';
 import TourGuide from './components/TourGuide';
 import ProductDashboard from './components/ProductDashboard';
 import { tourSteps } from './data';
-import type { AnalyticsEvent, AnalyticsEventType } from './types';
+import type { AnalyticsEvent, AnalyticsEventType, CandidateProfile } from './types';
 
-type AppState = 'welcome' | 'interview';
+type AppState = 'welcome' | 'profiling' | 'interview';
 
 const HardwareConsentModal = ({ onAllow, onClose, error, isLoading }: { onAllow: () => void; onClose: () => void; error: string | null; isLoading: boolean; }) => {
   const [cameraConsent, setCameraConsent] = useState(false);
@@ -99,17 +100,18 @@ const HardwareConsentModal = ({ onAllow, onClose, error, isLoading }: { onAllow:
 };
 
 const AppContent: React.FC = () => {
-  const { 
-    dyslexiaFont, 
-    isTourActive, 
-    tourStep, 
+  const {
+    dyslexiaFont,
+    isTourActive,
+    tourStep,
     nextTourStep,
     endTour,
     setVideoEnabled,
     participantId,
     condition,
-    setIsPredictiveActive, // Need this to reset home view
-    setFinishSessionTrigger
+    setIsPredictiveActive,
+    setFinishSessionTrigger,
+    setCandidateProfile,
   } = useSettings();
   const [appState, setAppState] = useState<AppState>('welcome');
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
@@ -155,6 +157,12 @@ const AppContent: React.FC = () => {
   }, []);
 
   const startInterview = () => {
+    setAppState('profiling');
+  };
+
+  const handleProfileComplete = (profile: CandidateProfile) => {
+    setCandidateProfile(profile);
+    logEvent('profile_submitted', { ...profile });
     setIsConsentModalOpen(true);
     setCameraError(null);
   };
@@ -235,6 +243,7 @@ const AppContent: React.FC = () => {
   return (
     <div className={`min-h-screen w-screen overflow-x-hidden bg-slate-100 text-slate-800 font-sans antialiased ${dyslexiaFont ? 'font-dyslexia-friendly' : ''}`}>
       {appState === 'welcome' && <WelcomeScreen onStart={startInterview} logEvent={logEvent} />}
+      {appState === 'profiling' && <ProfilingScreen onComplete={handleProfileComplete} />}
       {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} />}
 
       {showProductDashboard && (

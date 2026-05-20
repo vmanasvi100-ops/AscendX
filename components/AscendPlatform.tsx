@@ -28,6 +28,48 @@ interface SessionEntry {
 type VideoState = 'standard' | 'hidden';
 type AspectRatio = '9/16' | '2/3' | '3/4' | '4/5' | '3/2' | '16/10' | '16/5' | '16/7' | '20/7';
 
+function buildPlainLanguageSummary(feedback: DetailedFeedback): string {
+    // Priority order: merit vectors → CHC fluid reasoning → scaffold dependency → impression management
+    const mv = feedback.meritVectors;
+    if (mv) {
+        if (mv.lowestVector === 'autonomy' && mv.autonomy.score < 50)
+            return "your answers didn't clearly show your personal decisions";
+        if (mv.lowestVector === 'competence' && mv.competence.score < 50)
+            return "your answers needed more specific evidence of your skills";
+        if (mv.lowestVector === 'relatedness' && mv.relatedness.score < 50)
+            return "your answers rarely mentioned impact on others";
+    }
+    const chc = feedback.chcCognitiveDimensions;
+    if (chc) {
+        if (chc.fluidIntelligence.score !== null && chc.fluidIntelligence.score < 50)
+            return "your answers found it harder to adapt when questions shifted direction";
+        if (chc.crystallisedIntelligence.score !== null && chc.crystallisedIntelligence.score < 50)
+            return "your answers lacked specific domain knowledge for this role";
+        if (chc.practicalReasoning.score !== null && chc.practicalReasoning.score < 50)
+            return "your results lacked numbers or measurable outcomes";
+    }
+    const sc = feedback.scaffoldedLearningSignal;
+    if (sc) {
+        if (sc.scaffoldDependency.score > 65)
+            return "your answers improved most when follow-up questions were asked";
+        if (sc.phasingEffectiveness.trajectory === 'declining')
+            return "your answers were strongest early and lost structure later";
+    }
+    const im = feedback.impressionManagementScore;
+    if (im && im.frontStageScore > 70)
+        return "your answers felt well-rehearsed — try going deeper into what actually happened";
+    return feedback.weaknesses?.[0] ?? "keep building on your strengths from last session";
+}
+
+function saveSessionHistory(hint: string): void {
+    try {
+        const raw = localStorage.getItem('ascend_session_history');
+        const history: Array<{ date: string; hint: string }> = raw ? JSON.parse(raw) : [];
+        history.unshift({ date: new Date().toISOString(), hint });
+        localStorage.setItem('ascend_session_history', JSON.stringify(history.slice(0, 5)));
+    } catch { /* localStorage unavailable */ }
+}
+
 function encode(bytes: Uint8Array) {
     let binary = '';
     const len = bytes.byteLength;
@@ -99,6 +141,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         persistedAuditResult,
         questionsFinalized,
         jdcvAlignmentAnalysis,
+        candidateProfile,
     } = useSettings();
     const [starPhase, setStarPhase] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -165,6 +208,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         phaseStartTimestamp.current = Date.now();
     }, []);
 
+    useEffect(() => {
+        if (recordingStatus === 'uploaded' && detailedFeedback) {
+            logEvent('feedback_report_opened', { hasLayerB: !!detailedFeedback.meritVectors });
+        }
+    }, [recordingStatus, detailedFeedback]);
+
     // When new questions arrive while waiting mid-session, auto-advance to the next question
     useEffect(() => {
         if (!waitingForMoreQuestions) return;
@@ -173,6 +222,8 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             setCurrentQuestionIndex(prev => prev + 1);
             setStarPhase(0);
             setSessionSeconds(0);
+            setTranscript("");
+            lastPhaseTranscriptLength.current = 0;
             phaseStartTimestamp.current = Date.now();
             setIsProbingActive(false);
             setCurrentProbe(null);
@@ -197,6 +248,8 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             setCurrentQuestionIndex(prev => prev + 1);
             setStarPhase(0);
             setSessionSeconds(0);
+            setTranscript("");
+            lastPhaseTranscriptLength.current = 0;
             phaseStartTimestamp.current = Date.now();
             setIsProbingActive(false);
             setCurrentProbe(null);
@@ -334,7 +387,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
 
         try {
             const sessionPromise = ai.live.connect({
-                model: 'gemini-3-flash-native-audio-preview-09-2025',
+                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
                 callbacks: {
                     onopen: () => {
                         const source = audioContext.createMediaStreamSource(mediaStream);
@@ -368,7 +421,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                         if (audioContext.state !== 'closed') audioContext.close().catch(() => { });
                     }
                 },
-                config: { responseModalities: [Modality.AUDIO], inputAudioTranscription: {} }
+                config: { responseModalities: [Modality.TEXT], inputAudioTranscription: {} }
             });
             sessionPromiseRef.current = sessionPromise;
             setIsTranscribing(true);
@@ -426,12 +479,13 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 companyName,
                 cvSummary: cvText || 'Not provided',
                 jobDescription: jobDescription || 'Not provided',
-                currentQuestion: { text: currentQuestion.text, type: 'interview', difficulty: currentQuestion.difficulty },
+                currentQuestion: { text: currentQuestion.text, type: 'interview', difficulty: currentQuestion.difficulty, competency: currentQuestion.competency, excellenceBenchmark: currentQuestion.excellenceBenchmark, discriminantSignals: currentQuestion.discriminantSignals },
                 sessionPhaseIndex: currentQuestionIndex,
                 questionsAnsweredCount: currentQuestionIndex,
                 priorProbesThisQuestion: probeHistory.join(' | '),
                 candidateAnswer: transcript.slice(lastPhaseTranscriptLength.current),
                 conversationHistory: transcript.slice(-500),
+                candidateProfile,
             });
             setCurrentProbe(probe);
             setProbeHistory(prev => [...prev, probe.probe]);
@@ -501,6 +555,8 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                         },
                         targetRole,
                         companyName,
+                        cvSummary: cvText || undefined,
+                        jobDescription: jobDescription || undefined,
                     });
                 } catch (err) {
                     console.error('Failed to generate question summary:', err);
@@ -537,6 +593,8 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                     setCurrentQuestionIndex(prev => prev + 1);
                     setStarPhase(0);
                     setSessionSeconds(0);
+                    setTranscript("");
+                    lastPhaseTranscriptLength.current = 0;
                     phaseStartTimestamp.current = Date.now();
                     setIsProbingActive(false);
                     setCurrentProbe(null);
@@ -657,6 +715,8 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                                 },
                                 targetRole,
                                 companyName,
+                                cvSummary: cvText || undefined,
+                                jobDescription: jobDescription || undefined,
                             });
                         } catch (err) {
                             console.error('Failed to generate last question summary:', err);
@@ -675,7 +735,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                     }]);
 
                     // Show the last question insight
-                    setActiveTab('Report');
+                    setActiveTab('report');
 
                     // Start final report silently in background — user clicks Finish Session to navigate to it
                     handleGenerateFinalFeedback();
@@ -708,6 +768,8 @@ if (recordingStatus === 'recording') await handleRecord();
             setCurrentQuestionIndex(prev => prev + 1);
             setStarPhase(0);
             setSessionSeconds(0);
+            setTranscript("");
+            lastPhaseTranscriptLength.current = 0;
             phaseStartTimestamp.current = Date.now();
             // Reset probing state
             setIsProbingActive(false);
@@ -781,8 +843,10 @@ if (recordingStatus === 'recording') await handleRecord();
                 companyName,
                 condition: 'standard',
                 phaseProgression: `${currentQuestionIndex + 1} of ${activeQuestions.length} questions completed`,
+                candidateProfile,
             });
             setDetailedFeedback(feedback);
+            saveSessionHistory(buildPlainLanguageSummary(feedback));
         } catch (err) {
             console.error("Failed to generate final feedback:", err);
         } finally {
@@ -820,8 +884,9 @@ if (recordingStatus === 'recording') await handleRecord();
     const currentRequirement = currentQuestion.requirements[starPhase];
 
     // Derive coaching mode from question type and requirement ID prefix
-    const getCoachingMode = (q: typeof currentQuestion): 'star' | 'motivational' | 'jdcv' | 'jd-understanding' | 'cv-competency' => {
+    const getCoachingMode = (q: typeof currentQuestion): 'star' | 'motivational' | 'situational' | 'jdcv' | 'jd-understanding' | 'cv-competency' => {
         if (q.questionType === 'motivational') return 'motivational';
+        if (q.questionType === 'situational') return 'situational';
         const firstId = q.requirements?.[0]?.id || '';
         if (firstId.startsWith('jdcv')) return 'jdcv';
         if (firstId.startsWith('jd')) return 'jd-understanding';
@@ -832,11 +897,15 @@ if (recordingStatus === 'recording') await handleRecord();
 
     const COACHING_HEADERS: Record<typeof coachingMode, string> = {
         'star':            'STAR Strategy Checklist',
-        'motivational':    'What to Cover',
+        'motivational':    'Your Introduction Framework',
+        'situational':     'Your Experience Framework',
         'jdcv':            'Connecting Your Experience',
         'jd-understanding':'Understanding the Role',
         'cv-competency':   'Evidence from Your Background',
     };
+
+    const MOTIVATIONAL_PHASE_LABELS = ['Who', 'Journey', 'Edge', 'Direction'];
+    const SITUATIONAL_PHASE_LABELS  = ['Context', 'Your Role', 'Actions', 'Outcome'];
 
     const handleDownloadReport = () => {
         if (!detailedFeedback) return;
@@ -1374,6 +1443,17 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 )}
 
+                                {/* Empty state when CV was provided but JD wasn't substantive enough */}
+                                {cvText && !jdcvAlignmentAnalysis && jobDescription.trim().length < 80 && (
+                                    <section className="bg-slate-50 p-8 rounded-[40px] border border-dashed border-slate-200 space-y-3 text-center">
+                                        <p className="text-xs font-black uppercase tracking-widest text-slate-400">CV vs Job Description</p>
+                                        <p className="text-sm font-medium text-slate-500">
+                                            Paste a full job description at setup to see how your CV aligns with the specific requirements of this role.
+                                        </p>
+                                        <p className="text-[10px] text-slate-400">Without a JD, there are no stated requirements to measure against.</p>
+                                    </section>
+                                )}
+
                                 {jdcvAlignmentAnalysis && (() => {
                                     const a = jdcvAlignmentAnalysis;
                                     // Pull session responses to jdcv-prefixed questions
@@ -1384,16 +1464,32 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         <div className="flex items-center justify-between">
                                             <div>
                                                 <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
-                                                    <Target size={16} /> CV + JD Alignment Analysis
+                                                    <Target size={16} /> Your CV vs This Job Description
                                                 </h3>
-                                                <p className="text-[9px] font-medium text-slate-400 mt-1">Personalised to your CV and this role — including how you responded</p>
+                                                <p className="text-[9px] font-medium text-slate-400 mt-1">
+                                                    Comparing your CV against the specific requirements in the {targetRole} JD at {companyName}
+                                                </p>
                                             </div>
-                                            <div className="flex flex-col items-center shrink-0">
-                                                <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 font-black text-lg ${a.matchScore >= 70 ? 'border-emerald-400 text-emerald-600 bg-emerald-50' : a.matchScore >= 45 ? 'border-amber-400 text-amber-600 bg-amber-50' : 'border-rose-400 text-rose-600 bg-rose-50'}`}>
-                                                    {a.matchScore}
-                                                </div>
-                                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">Match Score</span>
-                                            </div>
+                                            {(() => {
+                                                const items = a.experienceAlignment || [];
+                                                const strong = items.filter(i => i.alignmentLevel === 'strong').length;
+                                                const partial = items.filter(i => i.alignmentLevel === 'partial').length;
+                                                const weak = items.filter(i => i.alignmentLevel === 'weak' || i.alignmentLevel === 'missing').length;
+                                                const total = items.length || 1;
+                                                const strongRatio = (strong + partial * 0.5) / total;
+                                                const label = strongRatio >= 0.7 ? 'Strong Fit' : strongRatio >= 0.45 ? 'Good Fit' : strongRatio >= 0.25 ? 'Developing' : 'Gaps to Address';
+                                                const cfg = strongRatio >= 0.7
+                                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                                    : strongRatio >= 0.45
+                                                    ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                                    : 'bg-rose-50 border-rose-300 text-rose-700';
+                                                return (
+                                                    <div className={`px-4 py-2 rounded-2xl border-2 text-center shrink-0 ${cfg}`}>
+                                                        <p className="text-xs font-black uppercase tracking-widest">{label}</p>
+                                                        <p className="text-[9px] font-bold opacity-70 mt-0.5">{strong} strong · {partial} partial · {weak} gap{weak !== 1 ? 's' : ''}</p>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         {/* Summary */}
@@ -1901,19 +1997,29 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 {COACHING_HEADERS[coachingMode]}
                                             </h4>
 
+                                            {coachingMode === 'motivational' && (
+                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
+                                                    Your introduction sets the tone for the entire interview. Take the interviewer through <span className="font-black">who you are</span>, the experiences that shaped you, <span className="font-black">what makes you genuinely different</span>, and why this opportunity matters to you. Interviewers remember candidates who tell a coherent story rather than listing their qualifications.
+                                                </p>
+                                            )}
+                                            {coachingMode === 'situational' && (
+                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
+                                                    Academic projects, placements, society roles, and part-time work are all strong evidence of your capability. Focus on <span className="font-black">what you personally contributed</span> rather than what your group achieved together.
+                                                </p>
+                                            )}
                                             {coachingMode === 'jdcv' && (
                                                 <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    This question is drawn from your CV and JD. Use your real experience to directly address what this role requires.
+                                                    This question is drawn directly from your CV and the job description. Use your real experience to address what this role requires, and make the connection between your background and the opportunity explicit.
                                                 </p>
                                             )}
                                             {coachingMode === 'jd-understanding' && (
                                                 <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    Show you've thought deeply about what this role actually involves — not just the title.
+                                                    Show the interviewer that you have thought carefully about what this role actually involves beyond the job title. Candidates who understand the real demands of a role stand out immediately.
                                                 </p>
                                             )}
                                             {coachingMode === 'cv-competency' && (
                                                 <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    This question probes a specific claim or achievement in your CV. Be precise — vague answers weaken credibility.
+                                                    This question is probing a specific claim or achievement from your CV. The more precise and concrete your answer, the more credible it becomes. Vague answers about things you have listed tend to raise more questions than they answer.
                                                 </p>
                                             )}
 
@@ -1936,6 +2042,22 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                                     {STAR_LABELS[idx]}
                                                                 </p>
                                                             )}
+                                                            {coachingMode === 'motivational' && (
+                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
+                                                                    idx < starPhase ? 'text-emerald-600' :
+                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
+                                                                }`}>
+                                                                    {MOTIVATIONAL_PHASE_LABELS[idx]}
+                                                                </p>
+                                                            )}
+                                                            {coachingMode === 'situational' && (
+                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
+                                                                    idx < starPhase ? 'text-emerald-600' :
+                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
+                                                                }`}>
+                                                                    {SITUATIONAL_PHASE_LABELS[idx]}
+                                                                </p>
+                                                            )}
                                                             <p className={`text-[11px] font-medium leading-tight mt-0.5 ${
                                                                 idx === starPhase ? 'text-slate-900' : 'text-slate-400'
                                                             }`}>
@@ -1945,6 +2067,26 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                     </div>
                                                 ))}
                                             </div>
+
+                                            {/* Competency label */}
+                                            {currentQuestion.competency && (
+                                                <div className="mt-4 flex items-center gap-2">
+                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Assessing</span>
+                                                    <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                                                        {currentQuestion.competency}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* Excellence benchmark */}
+                                            {currentQuestion.excellenceBenchmark && (
+                                                <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-1">What excellent looks like</p>
+                                                    <p className="text-[10px] text-amber-800 leading-relaxed font-medium">
+                                                        {currentQuestion.excellenceBenchmark}
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         <div className="border-b border-slate-100 pb-4">
@@ -1973,7 +2115,12 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
 
                                     <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 italic">
                                         <p className="text-[10px] font-medium text-indigo-700 leading-relaxed">
-                                            Focus on proving your alignment with the <span className="font-black uppercase tracking-widest">Action</span> and <span className="font-black uppercase tracking-widest">Result</span> phases to maximize coherence signals.
+                                            {coachingMode === 'motivational'
+                                                ? <>Move naturally through each section as though you are sharing your story rather than reading from a checklist. The <span className="font-black uppercase tracking-widest">Direction</span> section is where many candidates lose momentum, so give genuine thought to how you connect your past to where you want to go.</>
+                                                : coachingMode === 'situational'
+                                                ? <>Academic and placement experiences carry real weight in interviews. The <span className="font-black uppercase tracking-widest">Actions</span> section is your opportunity to show exactly what you personally contributed, so be as specific as you can.</>
+                                                : <>Interviewers remember the <span className="font-black uppercase tracking-widest">Action</span> section most. Phrases like &quot;I decided&quot; and &quot;I built&quot; create a stronger impression than &quot;we tried&quot;. Always close with a <span className="font-black uppercase tracking-widest">measurable Result</span>.</>
+                                            }
                                         </p>
                                     </div>
 
@@ -2097,13 +2244,30 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 {/* Rich Summary Report */}
                                                 {entry.summaryReport ? (
                                                     <div className="space-y-3">
-                                                        {/* Section 1: Overview */}
+                                                        {/* Competency Demonstration Level badge */}
+                                                        {entry.summaryReport.competencyDemonstrationLevel && (() => {
+                                                            const lvl = entry.summaryReport.competencyDemonstrationLevel!;
+                                                            const cfg = {
+                                                                Emerging:    { bg: 'bg-slate-100',  text: 'text-slate-600'   },
+                                                                Developing:  { bg: 'bg-amber-100',  text: 'text-amber-800'   },
+                                                                Established: { bg: 'bg-emerald-100', text: 'text-emerald-800' },
+                                                                Advanced:    { bg: 'bg-indigo-100', text: 'text-indigo-800'  },
+                                                            }[lvl];
+                                                            return (
+                                                                <div className={`px-3 py-2 rounded-xl flex items-center justify-between ${cfg.bg}`}>
+                                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${cfg.text}`}>Competency Demonstration</span>
+                                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${cfg.text}`}>{lvl}</span>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        {/* Overview */}
                                                         <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
                                                             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Answer Overview</p>
                                                             <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{entry.summaryReport.answerOverview}</p>
                                                         </div>
 
-                                                        {/* Section 2: Strengths */}
+                                                        {/* Strengths */}
                                                         {entry.summaryReport.strengths.length > 0 && (
                                                             <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
                                                                 <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2">What You Did Well</p>
@@ -2118,7 +2282,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
-                                                        {/* Section 3: Development Points */}
+                                                        {/* Development Points */}
                                                         {entry.summaryReport.developmentPoints.length > 0 && (
                                                             <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100">
                                                                 <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-2">Where to Go Deeper</p>
@@ -2134,7 +2298,15 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
-                                                        {/* Section 4: Probe Engagement */}
+                                                        {/* CV Alignment Note */}
+                                                        {entry.summaryReport.cvAlignmentNote && (
+                                                            <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Your Background & This Answer</p>
+                                                                <p className="text-[10px] font-medium text-indigo-800 leading-relaxed">{entry.summaryReport.cvAlignmentNote}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Probe Engagement */}
                                                         {entry.summaryReport.probeEngagement && (
                                                             <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
                                                                 <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Probe Engagement</p>
@@ -2142,7 +2314,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
-                                                        {/* Section 5: Probe Correlation */}
+                                                        {/* Act-Probe Correlation */}
                                                         {entry.summaryReport.probeCorrelation && (
                                                             <div className="p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100 border-dashed">
                                                                 <div className="flex items-center gap-2 mb-1">
@@ -2153,7 +2325,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
-                                                        {/* Section 6: Integrated Coaching */}
+                                                        {/* Integrated Coaching */}
                                                         {entry.summaryReport.integratedCoaching && (
                                                             <div className="p-3 bg-indigo-600 rounded-2xl border border-indigo-700 shadow-lg shadow-indigo-900/10">
                                                                 <div className="flex items-center gap-2 mb-1">
@@ -2164,7 +2336,15 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
-                                                        {/* Section 5: Practice Task */}
+                                                        {/* Forward Orientation */}
+                                                        {entry.summaryReport.forwardOrientation && (
+                                                            <div className="p-3 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-200 mb-1">Where This Takes You</p>
+                                                                <p className="text-[10px] font-medium text-white leading-relaxed">{entry.summaryReport.forwardOrientation}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* One Thing to Practise */}
                                                         {entry.summaryReport.practiceTask && (
                                                             <div className="p-3 bg-slate-900 rounded-2xl">
                                                                 <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-1">One Thing to Practise</p>
@@ -2212,8 +2392,8 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             }}
                                                             className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
                                                         >
-                                                            <Download size={12} />
-                                                            Download Analysis
+                                                            <BookOpen size={12} />
+                                                            Full Coaching Report
                                                         </button>
                                                     )}
                                                     {entry.probe && entry.probeAnalysis && (

@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult, JDCVAlignmentAnalysis } from '../types';
+import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult, JDCVAlignmentAnalysis, CandidateProfile } from '../types';
 import { tourSteps, interviewQuestions } from '../data';
 
 interface SettingsContextType extends Settings {
@@ -48,6 +48,8 @@ interface SettingsContextType extends Settings {
   setPhase2Started: (v: boolean) => void;
   jdcvAlignmentAnalysis: JDCVAlignmentAnalysis | null;
   setJdcvAlignmentAnalysis: (v: JDCVAlignmentAnalysis | null) => void;
+  candidateProfile: CandidateProfile | null;
+  setCandidateProfile: (profile: CandidateProfile | null) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -113,6 +115,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [questionsFinalized, setQuestionsFinalized] = useState(false);
   const [phase2Started, setPhase2Started] = useState(false);
   const [jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis] = useState<JDCVAlignmentAnalysis | null>(null);
+  const [candidateProfile, setCandidateProfile] = useState<CandidateProfile | null>(null);
   const [isTourActive, setIsTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [finishSessionTrigger, setFinishSessionTrigger] = useState(false);
@@ -168,6 +171,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     questionsFinalized, setQuestionsFinalized,
     phase2Started, setPhase2Started,
     jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis,
+    candidateProfile, setCandidateProfile,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

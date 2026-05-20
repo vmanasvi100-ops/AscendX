@@ -1,14 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
 import { AlertTriangle, Globe, ShieldCheck, ExternalLink } from 'lucide-react';
-import { AnalyticsEvent, ExperimentCondition } from '../types';
+import { AnalyticsEvent } from '../types';
 
 interface ProductDashboardProps {
     events: AnalyticsEvent[];
     onClose: () => void;
 }
 
-type DashboardTab = 'funnel' | 'architecture' | 'adoption' | 'engagement' | 'costs' | 'raw_data';
+type DashboardTab = 'participants' | 'funnel' | 'architecture' | 'adoption' | 'engagement' | 'costs' | 'raw_data';
 
 const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) => {
     const [activeTab, setActiveTab] = useState<DashboardTab>('funnel');
@@ -66,7 +66,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
         // --- Cost Estimation Logic ---
         const estimatedGeminiCost = totalSessions * 0.05; // $0.05 per full interview session
         const estimatedCloudRunCost = totalSessions * 0.001; // $0.001 per session
-        const searchGroundingEvents = events.filter(e => e.type === 'search_grounding_used').length;
+        const searchGroundingEvents = events.filter(e => (e.type as string) === 'search_grounding_used').length;
         const estimatedSearchCost = searchGroundingEvents * 0.002; // $0.002 per search
 
         const totalEstimatedCost = estimatedGeminiCost + estimatedCloudRunCost + estimatedSearchCost;
@@ -106,7 +106,106 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
         }
     };
 
+    // Verbatim response labels — exactly what the candidate selected in the profiling survey
+    const PROFILE_LABELS: Record<string, Record<string, string>> = {
+        experience: {
+            novice: 'None or one — this is quite new for me',
+            some: 'A handful — I have some idea of what to expect',
+            experienced: 'Quite a few — I feel reasonably comfortable',
+            expert: 'Many — interviews are familiar territory',
+        },
+        feedbackLiteracy: {
+            absorbs: 'I take notes and act on it straight away',
+            reflects: 'I prefer to think it over before deciding what to use',
+            overwhelmed: 'I often find it hard to know what to prioritise',
+            uncertain: 'I usually feel unsure what it means in practice',
+        },
+        regulatoryFocus: {
+            promotion: 'Focus on what I want to achieve',
+            prevention: 'Focus on avoiding mistakes',
+            mixed: 'A mix of both',
+            unclear: "I don't really have a fixed approach",
+        },
+        anxietyLevel: {
+            low: 'Stay calm and think clearly',
+            mild: 'Feel a little flustered but recover quickly',
+            moderate: 'Struggle to find the right words',
+            high: 'Go blank and need a moment to reset',
+        },
+    };
+
+    const verbatim = (dimension: string, key: string) =>
+        PROFILE_LABELS[dimension]?.[key] ?? key;
+
+    // Build per-participant rows from events
+    const participantRows = useMemo(() => {
+        const map = new Map<string, {
+            participantId: string;
+            condition: string;
+            experience: string;
+            feedbackLiteracy: string;
+            regulatoryFocus: string;
+            anxietyLevel: string;
+            sessionsStarted: number;
+            sessionsCompleted: number;
+            firstSeen: number;
+            lastSeen: number;
+        }>();
+
+        for (const e of events) {
+            const pid = e.participantId;
+            if (!map.has(pid)) {
+                map.set(pid, {
+                    participantId: pid,
+                    condition: e.condition ?? '—',
+                    experience: '—', feedbackLiteracy: '—',
+                    regulatoryFocus: '—', anxietyLevel: '—',
+                    sessionsStarted: 0, sessionsCompleted: 0,
+                    firstSeen: e.timestamp, lastSeen: e.timestamp,
+                });
+            }
+            const row = map.get(pid)!;
+            if (e.timestamp < row.firstSeen) row.firstSeen = e.timestamp;
+            if (e.timestamp > row.lastSeen) row.lastSeen = e.timestamp;
+            if (e.type === 'profile_submitted' && e.metadata) {
+                row.experience = e.metadata.experience ?? '—';
+                row.feedbackLiteracy = e.metadata.feedbackLiteracy ?? '—';
+                row.regulatoryFocus = e.metadata.regulatoryFocus ?? '—';
+                row.anxietyLevel = e.metadata.anxietyLevel ?? '—';
+            }
+            if (e.type === 'session_start') row.sessionsStarted += 1;
+            if (e.type === 'session_complete') row.sessionsCompleted += 1;
+        }
+
+        return Array.from(map.values()).sort((a, b) => b.lastSeen - a.lastSeen);
+    }, [events]);
+
+    const handleExportCSV = () => {
+        const headers = ['Participant ID', 'Condition', 'Interview Experience', 'How They Use Feedback', 'Preparation Approach', 'Under Pressure', 'Sessions Started', 'Sessions Completed', 'First Seen', 'Last Active'];
+        const rows = participantRows.map(r => [
+            r.participantId,
+            r.condition,
+            verbatim('experience', r.experience),
+            verbatim('feedbackLiteracy', r.feedbackLiteracy),
+            verbatim('regulatoryFocus', r.regulatoryFocus),
+            verbatim('anxietyLevel', r.anxietyLevel),
+            r.sessionsStarted,
+            r.sessionsCompleted,
+            new Date(r.firstSeen).toLocaleString(),
+            new Date(r.lastSeen).toLocaleString(),
+        ]);
+        const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ascendx_participants_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     const tabLabels: Record<DashboardTab, string> = {
+        participants: 'Participants',
         funnel: 'Funnel Stats',
         architecture: 'Vision Architecture',
         adoption: 'Feature Adoption',
@@ -143,7 +242,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                 </header>
 
                 <nav className="flex px-8 border-b border-slate-800 bg-slate-900/30 overflow-x-auto">
-                    {(['funnel', 'architecture', 'adoption', 'engagement', 'costs', 'raw_data'] as DashboardTab[]).map(tab => (
+                    {(['participants', 'funnel', 'architecture', 'adoption', 'engagement', 'costs', 'raw_data'] as DashboardTab[]).map(tab => (
                         <button 
                             key={tab} 
                             onClick={() => setActiveTab(tab)}
@@ -155,7 +254,64 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                 </nav>
 
                 <main className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-900/50">
-                    
+
+                    {activeTab === 'participants' && (
+                        <div className="animate-fade-in flex flex-col h-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                    {participantRows.length} Participant{participantRows.length !== 1 ? 's' : ''} Recorded
+                                </span>
+                                <button
+                                    onClick={handleExportCSV}
+                                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    Export CSV (Excel)
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-auto custom-scrollbar">
+                                {participantRows.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-sm font-bold uppercase tracking-widest">
+                                        No participants yet — profiles appear after the first session
+                                    </div>
+                                ) : (
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="sticky top-0 bg-slate-900 z-10 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                            <tr>
+                                                <th className="p-3 border-b border-slate-700">Participant ID</th>
+                                                <th className="p-3 border-b border-slate-700">Condition</th>
+                                                <th className="p-3 border-b border-slate-700">Interview Experience</th>
+                                                <th className="p-3 border-b border-slate-700">How They Use Feedback</th>
+                                                <th className="p-3 border-b border-slate-700">Preparation Approach</th>
+                                                <th className="p-3 border-b border-slate-700">Under Pressure</th>
+                                                <th className="p-3 border-b border-slate-700">Sessions</th>
+                                                <th className="p-3 border-b border-slate-700">Completed</th>
+                                                <th className="p-3 border-b border-slate-700">Last Active</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/50">
+                                            {participantRows.map((r, i) => (
+                                                <tr key={i} className="hover:bg-white/5 transition-colors">
+                                                    <td className="p-3 text-[10px] font-black text-indigo-400 font-mono">{r.participantId}</td>
+                                                    <td className="p-3 text-[10px] text-slate-400">{r.condition}</td>
+                                                    <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('experience', r.experience)}</td>
+                                                    <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('feedbackLiteracy', r.feedbackLiteracy)}</td>
+                                                    <td className="p-3 text-[10px] text-slate-300 max-w-[160px]">{verbatim('regulatoryFocus', r.regulatoryFocus)}</td>
+                                                    <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('anxietyLevel', r.anxietyLevel)}</td>
+                                                    <td className="p-3 text-[10px] text-slate-400 text-center">{r.sessionsStarted}</td>
+                                                    <td className="p-3 text-[10px] text-center">
+                                                        <span className={r.sessionsCompleted > 0 ? 'text-emerald-400 font-black' : 'text-slate-600'}>{r.sessionsCompleted}</span>
+                                                    </td>
+                                                    <td className="p-3 text-[10px] text-slate-500 font-mono">{new Date(r.lastSeen).toLocaleDateString()}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {activeTab === 'architecture' && (
                         <div className="h-full flex flex-col items-center justify-center space-y-12 animate-fade-in p-6">
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full max-w-5xl">

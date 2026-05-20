@@ -23,9 +23,11 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^0.575.0",
     "motion": "^12.34.3",
+    "node-cron": "^4.2.1",
     "nodemailer": "^8.0.1",
     "pdfjs-dist": "^5.4.624",
     "pdfkit": "^0.17.2",
+    "pg": "^8.20.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "recharts": "^3.7.0",
@@ -34,6 +36,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
