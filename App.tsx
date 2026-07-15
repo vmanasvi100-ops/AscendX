@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AscendPlatform from './components/AscendPlatform';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -129,21 +129,50 @@ const AppContent: React.FC = () => {
     }
   });
   const [showProductDashboard, setShowProductDashboard] = useState(false);
+  const syncedUpTo = useRef(0); // tracks how many events have been POSTed to backend
 
   useEffect(() => {
     localStorage.setItem('ascend_global_event_log', JSON.stringify(analyticsEvents));
   }, [analyticsEvents]);
 
   const logEvent = useCallback((type: AnalyticsEventType, metadata?: Record<string, any>) => {
-    const newEvent: AnalyticsEvent = { 
-        type, 
-        timestamp: Date.now(), 
-        participantId, 
-        condition, 
-        metadata 
+    const newEvent: AnalyticsEvent = {
+        type,
+        timestamp: Date.now(),
+        participantId,
+        condition,
+        metadata
     };
     setAnalyticsEvents(prev => [...prev, newEvent]);
   }, [participantId, condition]);
+
+  // Sync unsent events to backend (non-fatal — frontend works without it)
+  const syncEventsToBackend = useCallback((events: AnalyticsEvent[]) => {
+    const unsent = events.slice(syncedUpTo.current);
+    if (unsent.length === 0) return;
+    const count = unsent.length;
+    fetch('/api/analytics/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: unsent }),
+    }).then(() => { syncedUpTo.current += count; }).catch(() => {});
+  }, []);
+
+  // Sync when dashboard opens
+  useEffect(() => {
+    if (showProductDashboard) syncEventsToBackend(analyticsEvents);
+  }, [showProductDashboard]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleClearAllEvents = useCallback(() => {
+    setAnalyticsEvents([]);
+    syncedUpTo.current = 0;
+    fetch('/api/analytics/events', { method: 'DELETE' }).catch(() => {});
+  }, []);
+
+  const handleClearParticipantEvents = useCallback((pid: string) => {
+    setAnalyticsEvents(prev => prev.filter(e => e.participantId !== pid));
+    fetch(`/api/analytics/events/${encodeURIComponent(pid)}`, { method: 'DELETE' }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -247,9 +276,11 @@ const AppContent: React.FC = () => {
       {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} />}
 
       {showProductDashboard && (
-        <ProductDashboard 
-            events={analyticsEvents} 
-            onClose={() => setShowProductDashboard(false)} 
+        <ProductDashboard
+            events={analyticsEvents}
+            onClose={() => setShowProductDashboard(false)}
+            onClearAll={handleClearAllEvents}
+            onClearParticipant={handleClearParticipantEvents}
         />
       )}
 

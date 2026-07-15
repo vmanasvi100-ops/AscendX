@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult, JDCVAlignmentAnalysis, CandidateProfile } from '../types';
+import type { Settings, TimerDisplay, TimerFramingCondition, LiveTools, VisualFeedbackStyle, CoachMarkTheme, SpeechRate, TourResettableSettings, ExperimentCondition, Question, AuditResult, JDCVAlignmentAnalysis, CandidateProfile, MesoAccumulator, MesoDelta, SessionRecord, CompetencyDemonstrationLevel, MasteryComponent, RegFocusDelta, FeedbackOrientationDelta, CareerAdaptabilityStage, ScaffoldTrend } from '../types';
 import { tourSteps, interviewQuestions } from '../data';
 
 interface SettingsContextType extends Settings {
@@ -50,6 +50,14 @@ interface SettingsContextType extends Settings {
   setJdcvAlignmentAnalysis: (v: JDCVAlignmentAnalysis | null) => void;
   candidateProfile: CandidateProfile | null;
   setCandidateProfile: (profile: CandidateProfile | null) => void;
+  preSessionAnswer: string | null;
+  setPreSessionAnswer: (answer: string | null) => void;
+
+  // Meso accumulator — cross-session personality-adaptive architecture
+  mesoAccumulator: MesoAccumulator | null;
+  saveMesoAccumulator: (accumulator: MesoAccumulator) => void;
+  computeMesoDelta: (sessions: SessionRecord[]) => MesoDelta | null;
+  deriveUpdatedCandidateProfile: () => Partial<CandidateProfile> | null;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -76,11 +84,29 @@ const getInitialParticipantData = () => {
         pid = generateUniqueId();
         sessionStorage.setItem('ascend_active_pid', pid);
     }
-    const conditionParam = params.get('condition') as ExperimentCondition;
     const validConditions: ExperimentCondition[] = ['scaffolded', 'standard', 'minimal'];
-    const condition = validConditions.includes(conditionParam) ? conditionParam : validConditions[Math.floor(Math.random() * 3)];
+    const CONDITION_KEY = 'ascend_condition_lock';
+    const locked = localStorage.getItem(CONDITION_KEY) as ExperimentCondition | null;
+    let condition: ExperimentCondition;
+    if (locked && validConditions.includes(locked)) {
+        condition = locked;
+    } else {
+        const conditionParam = params.get('condition') as ExperimentCondition;
+        condition = validConditions.includes(conditionParam) ? conditionParam : validConditions[Math.floor(Math.random() * 3)];
+        localStorage.setItem(CONDITION_KEY, condition);
+    }
     return { pid, condition };
 };
+
+function leastSquaresSlope(values: number[]): number {
+  const n = values.length;
+  if (n < 2) return 0;
+  const xMean = (n - 1) / 2;
+  const yMean = values.reduce((a, b) => a + b, 0) / n;
+  const denom = values.reduce((s, _, i) => s + (i - xMean) ** 2, 0);
+  if (denom === 0) return 0;
+  return values.reduce((s, y, i) => s + (i - xMean) * (y - yMean), 0) / denom;
+}
 
 export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { pid: initialPid, condition: initialCondition } = getInitialParticipantData();
@@ -116,10 +142,110 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [phase2Started, setPhase2Started] = useState(false);
   const [jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis] = useState<JDCVAlignmentAnalysis | null>(null);
   const [candidateProfile, setCandidateProfile] = useState<CandidateProfile | null>(null);
+  const [preSessionAnswer, setPreSessionAnswer] = useState<string | null>(null);
+  const [mesoAccumulator, setMesoAccumulator] = useState<MesoAccumulator | null>(() => {
+    try {
+      const stored = localStorage.getItem('ascendx_meso_accumulator');
+      return stored ? (JSON.parse(stored) as MesoAccumulator) : null;
+    } catch { return null; }
+  });
   const [isTourActive, setIsTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [finishSessionTrigger, setFinishSessionTrigger] = useState(false);
   const [originalSettings, setOriginalSettings] = useState<TourResettableSettings | null>(null);
+
+  const saveMesoAccumulator = (accumulator: MesoAccumulator) => {
+    setMesoAccumulator(accumulator);
+    try { localStorage.setItem('ascendx_meso_accumulator', JSON.stringify(accumulator)); } catch { /* storage full */ }
+  };
+
+  const computeMesoDelta = (sessions: SessionRecord[]): MesoDelta | null => {
+    if (sessions.length < 2) return null;
+
+    const levelMap: Record<CompetencyDemonstrationLevel, number> = {
+      Emerging: 1, Developing: 2, Established: 3, Advanced: 4,
+    };
+    const sessionMeans = sessions
+      .map(s => {
+        const valid = s.competencyLevels.map(l => levelMap[l]).filter(Boolean);
+        return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+      })
+      .filter((v): v is number => v !== null);
+    const competencySlope = sessionMeans.length >= 2 ? leastSquaresSlope(sessionMeans) : 0;
+
+    const scaffoldSlope = leastSquaresSlope(sessions.map(s => s.scaffoldDependencyScore));
+    const mesoScaffoldReduced = scaffoldSlope < -0.1;
+    const scaffoldTrend: ScaffoldTrend =
+      scaffoldSlope < -0.1 ? 'reducing' :
+      scaffoldSlope > 0.1  ? 'increasing' :
+      sessions.length >= 2 ? 'stable' : 'insufficient_data';
+
+    const first = sessions[0];
+    const last  = sessions[sessions.length - 1];
+    let regulatoryShift: RegFocusDelta;
+    if (first.regulatoryFocus === 'prevention' && (last.regulatoryFocus === 'promotion' || last.regulatoryFocus === 'mixed'))
+      regulatoryShift = 'prevention_to_promotion';
+    else if (first.regulatoryFocus === 'promotion' && last.regulatoryFocus === 'prevention')
+      regulatoryShift = 'promotion_to_prevention';
+    else if (last.regulatoryFocus === 'promotion') regulatoryShift = 'stable_promotion';
+    else if (last.regulatoryFocus === 'prevention') regulatoryShift = 'stable_prevention';
+    else regulatoryShift = 'stable_mixed';
+
+    const orientOrd: Record<string, number> = { avoidant: 0, uncertain: 1, responsive: 2, proactive: 3 };
+    const orientDiff = (orientOrd[last.feedbackOrientation] ?? 1) - (orientOrd[first.feedbackOrientation] ?? 1);
+    const feedbackOrientationDelta: FeedbackOrientationDelta =
+      orientDiff > 0 ? 'improving' : orientDiff < 0 ? 'declining' : 'stable';
+
+    const anxietyCounts: Record<string, number> = {};
+    sessions.forEach(s => { anxietyCounts[s.anxietyLevel] = (anxietyCounts[s.anxietyLevel] ?? 0) + 1; });
+    const dominantAnxietyLevel = (Object.entries(anxietyCounts)
+      .sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'mild') as MesoDelta['dominantAnxietyLevel'];
+
+    const allComponents: MasteryComponent[] = ['situation', 'task', 'action', 'result'];
+    const masteryConsolidated = allComponents.filter(c =>
+      sessions.filter(s => s.starComponentsReached.includes(c)).length >= 2
+    );
+
+    const stageOrder: CareerAdaptabilityStage[] = ['concern', 'control', 'curiosity', 'confidence'];
+    const currentCareerAdaptabilityStage = stageOrder[Math.min(masteryConsolidated.length, stageOrder.length - 1)];
+
+    const prevSession = sessions[sessions.length - 2];
+    const forwardOrientationActioned =
+      prevSession.forwardOrientationNotes.length > 0 &&
+      last.starComponentsReached.length > prevSession.starComponentsReached.length;
+    const priorFeedForwardAction = prevSession.forwardOrientationNotes.slice(-1)[0] ?? null;
+
+    return {
+      sessionCount: sessions.length,
+      competencySlope,
+      scaffoldTrend,
+      mesoScaffoldReduced,
+      regulatoryShift,
+      feedbackOrientationDelta,
+      dominantAnxietyLevel,
+      masteryConsolidated,
+      forwardOrientationActioned,
+      currentCareerAdaptabilityStage,
+      priorFeedForwardAction,
+      zpd_lowerBoundaryAdvanced: competencySlope > 0,
+    };
+  };
+
+  const deriveUpdatedCandidateProfile = (): Partial<CandidateProfile> | null => {
+    if (!mesoAccumulator?.delta) return null;
+    const { delta } = mesoAccumulator;
+    const patch: Partial<CandidateProfile> = {};
+
+    if (delta.regulatoryShift === 'prevention_to_promotion') patch.regulatoryFocus = 'mixed';
+    else if (delta.regulatoryShift === 'stable_promotion')   patch.regulatoryFocus = 'promotion';
+    else if (delta.regulatoryShift === 'stable_prevention')  patch.regulatoryFocus = 'prevention';
+
+    if      (delta.feedbackOrientationDelta === 'improving') patch.seeksFeedback = 'responsive';
+    else if (delta.feedbackOrientationDelta === 'declining') patch.seeksFeedback = 'avoidant';
+
+    patch.anxietyLevel = delta.dominantAnxietyLevel;
+    return Object.keys(patch).length ? patch : null;
+  };
 
   const startTour = () => {
     setOriginalSettings({ timerDisplay, liveTools, dyslexiaFont, visualFeedback, audioCues, gamification, videoEnabled });
@@ -172,6 +298,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     phase2Started, setPhase2Started,
     jdcvAlignmentAnalysis, setJdcvAlignmentAnalysis,
     candidateProfile, setCandidateProfile,
+    preSessionAnswer, setPreSessionAnswer,
+    mesoAccumulator, saveMesoAccumulator, computeMesoDelta, deriveUpdatedCandidateProfile,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

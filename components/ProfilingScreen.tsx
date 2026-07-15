@@ -6,7 +6,7 @@ interface ProfilingScreenProps {
   onComplete: (profile: CandidateProfile) => void;
 }
 
-type Step = 0 | 1 | 2 | 3;
+type Step = 0 | 1 | 2 | 3 | 4;
 
 interface Question {
   id: keyof CandidateProfile;
@@ -60,6 +60,17 @@ const QUESTIONS: Question[] = [
       { label: 'Go blank and need a moment to reset', value: 'high' },
     ],
   },
+  {
+    id: 'seeksFeedback',
+    text: 'Outside of formal settings, how do you usually get feedback on your work?',
+    subtext: 'This shapes how the session encourages you to use feedback going forward.',
+    options: [
+      { label: 'I actively ask for it — from peers, mentors, or anyone I trust', value: 'proactive' },
+      { label: 'I wait until feedback is offered, then I use it', value: 'responsive' },
+      { label: 'I tend to avoid it — it can feel uncomfortable', value: 'avoidant' },
+      { label: "I'm not sure I have a consistent pattern", value: 'uncertain' },
+    ],
+  },
 ];
 
 const ProfilingScreen: React.FC<ProfilingScreenProps> = ({ onComplete }) => {
@@ -75,14 +86,14 @@ const ProfilingScreen: React.FC<ProfilingScreenProps> = ({ onComplete }) => {
 
   const handleNext = () => {
     if (!selected) return;
-    if (step < 3) {
+    if (step < 4) {
       setStep((step + 1) as Step);
     } else {
       onComplete(answers as CandidateProfile);
     }
   };
 
-  const isLast = step === 3;
+  const isLast = step === 4;
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-100 p-4 sm:p-6 md:p-8 animate-fade-in">
@@ -92,14 +103,14 @@ const ProfilingScreen: React.FC<ProfilingScreenProps> = ({ onComplete }) => {
         <div className="h-1 bg-slate-100">
           <div
             className="h-1 bg-indigo-600 transition-all duration-500"
-            style={{ width: `${((step + 1) / 4) * 100}%` }}
+            style={{ width: `${((step + 1) / 5) * 100}%` }}
           />
         </div>
 
         <div className="p-8">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">
-              Question {step + 1} of 4
+              Question {step + 1} of 5
             </span>
           </div>
 

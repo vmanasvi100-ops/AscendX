@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { DetailedFeedback } from "../types";
+import { DetailedFeedback, MesoAccumulator, MasteryComponent } from "../types";
 
 const getAI = () => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
@@ -16,7 +16,8 @@ export interface GenerateFeedbackParams {
   companyName: string;
   condition: 'scaffolded' | 'standard' | 'minimal';
   phaseProgression: string;
-  candidateProfile?: { experience: string; feedbackLiteracy: string; regulatoryFocus: string; anxietyLevel: string } | null;
+  candidateProfile?: { experience: string; feedbackLiteracy: string; seeksFeedback: string; regulatoryFocus: string; anxietyLevel: string } | null;
+  mesoAccumulator?: Pick<MesoAccumulator, 'delta' | 'sessions'> | null;
 }
 
 export const generateDetailedFeedback = async (
@@ -26,8 +27,36 @@ export const generateDetailedFeedback = async (
   const model = "gemini-3-flash-preview";
 
 
+  // ── Meso-level context (all null-safe — first-session candidates see no change) ──
+  const mesoDelta = params.mesoAccumulator?.delta ?? null;
+
+  // 4C — Blended framing: prevention→promotion transition requires dual-channel language
+  const useBlendedFraming = mesoDelta?.regulatoryShift === 'prevention_to_promotion';
+  const blendedFramingInstruction = useBlendedFraming
+    ? `REGULATORY TRANSITION FRAMING: This candidate has shifted from prevention-focus to promotion-focus across sessions. Frame ALL development suggestions using BLENDED language — both as growth opportunities AND as protection against gaps. Example: "Building this skill opens new possibilities [promotion] while ensuring you avoid a gap interviewers look for [prevention]."`
+    : '';
+
+  // 4D — Career adaptability stage: target only the NEXT stage (Savickas 4Cs sequence)
+  const careerAdaptabilityStage = mesoDelta?.currentCareerAdaptabilityStage ?? null;
+  const adaptabilityInstruction = careerAdaptabilityStage
+    ? `CAREER ADAPTABILITY STAGE TARGETING (Savickas 2012): This candidate is at the '${careerAdaptabilityStage}' stage. Component 5 (forwardOrientation) MUST target ONLY the next stage behaviour — do not reference all four Cs. concern→build planning orientation | control→reinforce personal agency | curiosity→encourage role exploration | confidence→strengthen career self-efficacy.`
+    : '';
+
+  // 4A — Mastery context for Layer B
+  const masteryConsolidated: MasteryComponent[] = mesoDelta?.masteryConsolidated ?? [];
+  const masteryContext = masteryConsolidated.length
+    ? `Cross-session STAR mastery consolidated (evidenced in ≥2 sessions): ${masteryConsolidated.join(', ')}.`
+    : '';
+
+  // 4B — Prior calibration gaps for Layer B
+  const priorSessionGaps = params.mesoAccumulator?.sessions?.slice(-3).flatMap(s => {
+    const missing = (['situation', 'task', 'action', 'result'] as MasteryComponent[])
+      .filter(c => !s.starComponentsReached.includes(c));
+    return missing.map(c => `Session ${s.sessionId}: ${c} not reached`);
+  }) ?? [];
+
   // ==========================================
-  // LAYER A & B: TRIGGER FINAL FEEDBACK GEN 
+  // LAYER A & B: TRIGGER FINAL FEEDBACK GEN
   // ==========================================
   try {
     const response = await ai.models.generateContent({
@@ -47,11 +76,11 @@ NEVER mix their tones, vocabularies, or purposes.
 
 LAYER A — STUDENT-FACING FIELDS:
   performanceSummary, overallStarSynthesis, strengths, weaknesses, actionableSuggestions,
-  starAnalysis, keywordCoverage, careerDevelopment, rubrics
+  starAnalysis, keywordCoverage, careerDevelopment, rubrics, cvJdAlignmentNote
 
 LAYER B — RESEARCHER-ONLY FIELDS:
   meritVectors, triarchicMeritAlignment, professionalSelfVerificationSignals,
-  impressionManagementScore, socialIdentityAwareness,
+  socialIdentityAwareness,
   algorithmicAversionScore, psychologicalSafetyScore,
   biasAndFairnessNote, integrityViolation, maskedTranscript
 
@@ -62,7 +91,8 @@ Job Requirements:          ${params.jobRequirements}
 Candidate CV:              ${params.cvText || 'Not provided.'}
 Interview Transcript:      ${params.transcript}
 Probing Pipeline Analysis: ${params.probeAnalysis || 'Not available.'}
-Adaptive Profile:          ${params.candidateProfile ? `experience=${params.candidateProfile.experience}, feedbackLiteracy=${params.candidateProfile.feedbackLiteracy}, regulatoryFocus=${params.candidateProfile.regulatoryFocus}, anxietyLevel=${params.candidateProfile.anxietyLevel} — adjust Layer A tone: overwhelmed/uncertain→max 3 suggestions; promotion→frame as opportunities; prevention→frame as corrections; high anxiety→open with a genuine strength, no negative openers.` : 'Not provided — use defaults.'}
+Adaptive Profile:          ${params.candidateProfile ? `experience=${params.candidateProfile.experience}, feedbackLiteracy=${params.candidateProfile.feedbackLiteracy}, seeksFeedback=${params.candidateProfile.seeksFeedback}, regulatoryFocus=${params.candidateProfile.regulatoryFocus}, anxietyLevel=${params.candidateProfile.anxietyLevel} — adjust Layer A tone: overwhelmed/uncertain→max 3 suggestions; promotion→frame as opportunities; prevention→frame as corrections; high anxiety→open with a genuine strength, no negative openers; proactive→encourage self-generated feedback; avoidant→open feedback with safety framing.` : 'Not provided — use defaults.'}
+${masteryContext ? `Cross-session mastery context: ${masteryContext}` : ''}
 
 ═══════════════════════════════════════════════════════
 STEP 0 — GENERATE LAYER B SCORES FIRST
@@ -72,22 +102,12 @@ Before writing any Layer A feedback, generate all Layer B scores from the transc
 Use those scores to personalise Layer A — do not write generic coaching. The frameworks must drive the feedback content.
 
 Specifically:
-- If 'autonomy' is the Lowest Merit Vector in Step 0: the primary actionable
+- If 'personalAgency' is the Lowest Evidence Vector in Step 0: the primary actionable
   suggestion must address ownership and agency directly.
-- If 'competence' is the Lowest Merit Vector in Step 0: the primary suggestion
+- If 'skillSpecificity' is the Lowest Evidence Vector in Step 0: the primary suggestion
   must address depth of evidence and measurable impact.
-- If 'relatedness' is the Lowest Merit Vector in Step 0: the primary suggestion
+- If 'impactArticulation' is the Lowest Evidence Vector in Step 0: the primary suggestion
   must address how the candidate frames their impact on others.
-
-- If impressionManagementScore.frontStageScore > 75 (high impression management detected):
-  the feedback must include one prompt inviting more authentic
-  disclosure — e.g. 'Try telling me what you actually found hard
-  about that situation, not just what you did.'
-- If impressionManagementScore.backStageScore > 75 (highly authentic but unstructured):
-  the feedback must affirm the authenticity and help structure it
-  — e.g. 'Your honesty comes through powerfully — the next step
-  is giving that authenticity a clear STAR structure so interviewers
-  can follow and advocate for your story.'
 
 - If valueExpression dominates socialRecognition (Highhouse, 2007) - infer from transcript if needed:
   frame ALL development areas in terms of personal alignment —
@@ -150,15 +170,16 @@ Example: 'Concrete results: You quantified your outcome with a specific figure
   and timeframe — this is exactly what competitive interviewers look for.'
 
 ── actionableSuggestions ─────────────────────────────
+${blendedFramingInstruction}
 CRITICAL: Generate at least 5 actionable suggestions.
 Use the Step 0 lowest signals to prioritise these.
 
 PRIORITY ORDER for which suggestion leads:
-  1. If lowestVector from Step 0 addresses a real gap → SDT leads
-  3. If lowestSignal from chcCognitiveDimensions is 'weak' → CHC (in plain language) leads
-  4. Keyword coverage gap from JD
+  1. If lowestVector from Step 0 flags a behavioral evidence gap → Behavioral Evidence leads
+  2. If lowestSignal from chcCognitiveDimensions indicates a weak Kolb ELC stage → ELC stage coaching leads
+  3. Keyword coverage gap from JD
 
-SDT TRANSLATIONS (use these exact framings — no SDT labels):
+BEHAVIORAL EVIDENCE TRANSLATIONS (use these exact framings — no theoretical labels visible to candidate):
   Autonomy weak: 'Use more "I decided" and "I chose" language. Interviewers are
     assessing your judgment — they need to hear your specific decisions, not just
     what the team did or what happened. Own your choices explicitly.'
@@ -169,7 +190,7 @@ SDT TRANSLATIONS (use these exact framings — no SDT labels):
     Interviewers at this level assess not just what you achieved but how you
     brought people with you. Name the people, describe the impact on them.'
 
-CHC TRANSLATIONS (plain English — no abbreviations):
+KOLB ELC STAGE COACHING TRANSLATIONS (plain English — framed as learning cycle stage signals, no CHC labels):
   Gc weak: 'Bring in more specific knowledge about the sector and role.
     One or two precise examples from your reading or experience will signal
     that you understand the world this organisation operates in.'
@@ -193,6 +214,7 @@ List: keywords present (with example usage), keywords missing (with one-line tip
 Language: 'You naturally used...' and 'It would strengthen your case to mention...'
 
 ── careerDevelopment ───────────────────────────────────────────────
+${adaptabilityInstruction}
 Object containing:
 - certifications: 2-3 specific certifications relevant to the role.
 - nextSteps: 2-3 prioritized next steps for candidate improvement.
@@ -210,6 +232,27 @@ IF scaffoldedLearningSignal.interpretation = 'independent':
   processes test. Focus your remaining preparation on deepening evidence
   quality rather than structural confidence — the structure is already there.'
 
+── cvJdAlignmentNote (Layer A — visible to candidate) ──────────
+IF credibilityFlag.triggered = false AND (cvAlignmentScore >= 60 OR jdAlignmentScore >= 60):
+  Write 1–2 sentences affirming that the candidate's answers drew on their
+  documented experience and addressed the role's requirements directly.
+  Example: "Your answers consistently drew on the stakeholder management experience
+  in your background and addressed the core analytical requirements in the job
+  description directly — the connection between your history and this opportunity
+  came through clearly."
+  Include only when earned.
+
+IF credibilityFlag.triggered = true:
+  Write a neutral, non-accusatory 1–2 sentence prompt encouraging the candidate
+  to make more explicit connections between their specific past experiences and
+  the core requirements of the role. Do NOT flag the misalignment to the candidate.
+  Example: "It would strengthen your answers to draw more directly on specific
+  experiences from your background — the more precisely you connect what you have
+  done to what this role requires, the more compelling your case becomes."
+
+IF both cvAlignmentScore and jdAlignmentScore are null:
+  Return empty string.
+
 ── rubrics ─────────────────────────────────────────────────────────
 Score the following per answer. Scale 1–5. Brief justification each.
   - STAR Completion (1–5)
@@ -224,12 +267,32 @@ NEVER include in candidate-facing output.
 Grounded in Step 0 signals. Return full JSON object.
 ═══════════════════════════════════════════════════════════════════
 
-── meritVectors (SDT — Deci & Ryan, 2000) ──────────────────────
+── meritVectors (Behavioral Evidence Vectors — Levashina & Campion 2007; Ericsson & Pool 2016) ──
+Score three observable behavioral evidence dimensions from the transcript. These are session performance
+indicators, not trait assessments. They identify which evidence quality dimension needs the most development.
 meritVectors: {
-  autonomy: { score: 0–100, evidenceBasis: string },
-  competence: { score: 0–100, evidenceBasis: string },
-  relatedness: { score: 0–100, evidenceBasis: string },
-  lowestVector: 'autonomy' | 'competence' | 'relatedness',
+  personalAgency: {
+    score: 0–100,
+    // Personal Agency Evidence (Ericsson 2016 — ownership of the practice/action process predicts skill development):
+    // Did the candidate use "I decided / I chose / I initiated" language showing personal ownership of their decisions?
+    // High = clear personal agency; Low = team/passive language throughout
+    evidenceBasis: string
+  },
+  skillSpecificity: {
+    score: 0–100,
+    // Skill Specificity Evidence (Levashina & Campion 2007 — behavioral specificity predicts criterion validity):
+    // Did the candidate provide concrete, specific demonstrations with measurable outcomes?
+    // High = named tools, quantified results, specific timelines; Low = vague generalisations
+    evidenceBasis: string
+  },
+  impactArticulation: {
+    score: 0–100,
+    // Impact Articulation (Baldwin & Ford 1988 — transfer indicators include articulating outcomes on others):
+    // Did the candidate describe the effect of their actions on others and the organisation?
+    // High = named people, described team/stakeholder impact; Low = no mention of others
+    evidenceBasis: string
+  },
+  lowestVector: 'personalAgency' | 'skillSpecificity' | 'impactArticulation',
   primarySuggestionAnchor: string  // what Layer A's primary suggestion addresses
 }
 
@@ -333,20 +396,42 @@ Journal. Bridges: Kristof-Brown et al. (2005);
 Swann & Bosson (2010); Levashina et al. (2014).
 AI proxy — under investigation in AscendX RCT.'
 
-── impressionManagementScore (Goffman, 1959) ───────────────────
-impressionManagementScore: {
-  frontStageScore: 0–100,
-  backStageScore: 0–100,
-  dominantMode: 'front_stage' | 'back_stage' | 'balanced',
-  authenticitySignal: string,
-  feedbackImplication: string  // what this drove in Layer A
+── credibilityFlag ──────────────────────────────────────────────
+This is a null-alignment detection signal. Flag when the gap between what the
+candidate said and what their documented background or the role requires is large
+enough to undermine confidence in the interview evidence.
+
+SET credibilityFlag.triggered = true IF:
+  cvAlignmentScore is not null AND cvAlignmentScore < 20
+  OR jdAlignmentScore is not null AND jdAlignmentScore < 20
+
+credibilityFlag: {
+  triggered: true | false,
+  cvGrounding: 'aligned' | 'partial' | 'absent' | 'no_cv',
+  // aligned: clear traceable links between transcript and CV
+  // partial: some overlap but significant unexplained claims
+  // absent: candidate's interview content has no traceable basis in CV
+  // no_cv: no CV was provided
+  jdGrounding: 'aligned' | 'partial' | 'absent' | 'no_jd',
+  // aligned: answers addressed core JD requirements directly
+  // partial: some JD requirements addressed, others ignored
+  // absent: answers had no meaningful overlap with JD requirements
+  // no_jd: no JD was provided
+  flagReason: string | null,
+  // Required when triggered = true.
+  // Cite the specific mismatch: what did the candidate claim that cannot be
+  // traced to their CV, or what core JD requirement went entirely unaddressed?
+  // This is a researcher-only field — must be precise and evidence-grounded.
+  researchNote: 'Alignment gap between self-report and documented background. Exploratory signal — not a validity judgment. Possible explanations include: undocumented genuine experience, preparation failure, role mismatch, or fabrication. Researcher interpretation required.'
 }
 
-── algorithmicAversionSignal (Dietvorst et al., 2015) ──────────
+── algorithmicAversionSignal (Trust Calibration — Dietvorst et al., 2015; updated framing 2024) ──
+Reframed as trust calibration: detects scepticism AND appreciation signals.
+Candidates who receive rationale-accompanied feedback show higher trust (2024 explainable AI literature).
 algorithmicAversionSignal: {
   aversionDetected: true | false,
   aversionEvidence: string | null,
-  feedbackImplication: string  // whether Layer A opened with acknowledgement
+  feedbackImplication: string  // whether Layer A opened with acknowledgement and rationale transparency
 }
 
 ── socialIdentityAwareness (Highhouse et al., 2007) ────────────
@@ -360,32 +445,42 @@ socialIdentityAwareness: {
   scopeNote: 'Applied only where candidate discussed organisation motivation'
 }
 
-── chcCognitiveDimensions (McGrew / CHC, 2009) ─────────────────
-Replaces Sternberg. Three CHC dimensions observable from verbal performance.
+── chcCognitiveDimensions (Kolb ELC Stage Completion Signals — Kolb 1984; POT proxy per Kovacs & Conway 2016) ──
+THEORETICAL GROUNDING: These are Kolb ELC stage completion signals inferred from transcript quality.
+They do NOT claim to measure cognitive ability. Field names match Kolb stage terminology directly.
+  abstractConceptualisation: AC quality — did the candidate draw on accumulated domain knowledge to
+    construct meaning from their experience?
+  activeExperimentation: AE quality — did the candidate reason adaptively under novel probing,
+    showing they can test new approaches?
+  concreteExperience: CE specificity — did the candidate articulate measurable outcomes, grounding
+    abstract reflection in specific evidence?
+Process Overlap Theory (Kovacs & Conway, 2016) provides the inferential mechanism.
 chcCognitiveDimensions: {
-  crystallisedIntelligence: {
+  abstractConceptualisation: {
     score: 0–100 | null,
-    // Gc: accumulated knowledge, vocabulary, domain-specific evidence quality
+    // AC signal: depth of domain knowledge applied; vocabulary precision; role-specific evidence drawn on
     evidenceBasis: string,
-    validityDisclaimer: 'AI-generated Gc proxy — exploratory, not validated'
+    validityDisclaimer: 'Kolb Abstract Conceptualisation proxy — exploratory signal, not an ability measure'
   },
-  fluidIntelligence: {
+  activeExperimentation: {
     score: 0–100 | null,
-    // Gf: adaptive reasoning, flexibility under probing, novel problem-solving
+    // AE signal: adaptive reasoning flexibility under novel probing; reasoning under uncertainty
     evidenceBasis: string,
-    validityDisclaimer: 'AI-generated Gf proxy — exploratory, not validated'
+    validityDisclaimer: 'Kolb Active Experimentation proxy — exploratory signal, not an ability measure'
   },
-  practicalReasoning: {
+  concreteExperience: {
     score: 0–100 | null,
-    // Gq: result specificity, action clarity, transfer from learning to action
+    // CE signal: result specificity; measurable outcomes; transfer from learning to action articulated
     evidenceBasis: string,
-    validityDisclaimer: 'AI-generated Gq proxy — exploratory, not validated'
+    validityDisclaimer: 'Kolb Concrete Experience specificity proxy — exploratory signal, not an ability measure'
   },
-  overallCHCNote: string,
-  researchNote: 'CHC dimensions scored per McGrew (2009). AI operationalisation — validity under empirical investigation in AscendX RCT.'
+  overallELCNote: string,
+  researchNote: 'Kolb ELC stage completion signals (Kolb, 1984). Process Overlap Theory (Kovacs & Conway, 2016) as inferential mechanism. AI operationalisation — empirical validation against external instruments pending.'
 }
 
-── scaffoldedLearningSignal (Vygotsky, 1978; Wood et al., 1976) ─
+── scaffoldedLearningSignal (Vygotsky 1978; Wood et al. 1976; adaptive LLM scaffolding theory 2025) ─
+NOTE: Probe difficulty escalation follows LLM-based adaptive scaffolding principles (arxiv 2025)
+where support withdrawal is based on observed performance, not fixed question index.
 scaffoldedLearningSignal: {
   zpdProgressionObservation: string,  // did performance improve across phases?
   scaffoldDependency: {
@@ -422,6 +517,100 @@ psychologicalSafetyScore: {
     strengthsFirst: true | false,
     warmTone: true | false
   }
+}
+
+── verbalImprovementPlan (Layer A — candidate-facing verbal coaching) ──────────────────────────
+Analyse the TRANSCRIPT for verbal communication patterns. Be specific — reference actual moments.
+verbalImprovementPlan: {
+  fillerPatterns: string,
+  // Identify specific filler words, hesitation markers, or repetition patterns observed.
+  // Quote the actual words/phrases. E.g. "You used 'basically' and 'you know' frequently,
+  // particularly when transitioning between STAR stages — these signal uncertainty to interviewers."
+  // If none detected, state that clearly.
+
+  pacingAssessment: string,
+  // How did the candidate's speaking pace affect comprehension and confidence signal?
+  // Did they rush under probing? Trail off at the Result stage? Be specific to the transcript.
+
+  clarityTargets: string[],
+  // 2–3 specific verbal habits to change — each one sentence, directly actionable.
+  // E.g. "Replace 'we did' with 'I specifically did' when describing your action steps."
+  // Must reference something actually observed in the transcript.
+
+  practiceMethod: string
+  // One concrete method to fix the identified patterns before the next session.
+  // E.g. "Record yourself answering one STAR question per day and listen back for the
+  // specific fillers above — marking the timestamp each time helps pattern recognition."
+}
+
+── hiringProfileAlignment (Layer A — recruiter/hiring manager perspective) ─────────────────────
+You are now thinking like a hiring manager for the ${params.targetRole} role at ${params.companyName}.
+What does someone in that hiring seat actually look for — and how does this candidate match?
+hiringProfileAlignment: {
+  whatInterviewersLookFor: string[],
+  // 3–4 signals hiring managers for THIS specific role and company actually screen for.
+  // Ground this in the JD and role level. Be specific — not generic interview tips.
+  // E.g. "Evidence of managing competing priorities without escalating to management"
+
+  candidateAlignedStrengths: string[],
+  // Where does this candidate already match the hiring profile? 2–3 points.
+  // Must reference something the candidate actually said.
+
+  profileGaps: string[],
+  // What is missing from the hiring manager's perspective? 2–3 specific gaps.
+  // Frame as observable evidence gaps, not personal criticisms.
+  // E.g. "No evidence of working with external stakeholders — critical for this role."
+
+  priorityFix: string
+  // The ONE change that would most increase this candidate's hireability for this role.
+  // Be direct. One sentence. This is the most important output of this section.
+}
+
+── elcLearningCycle (Layer A — Kolb ELC session trace, written for candidate) ──────────────────
+Frame this as a learning cycle trace — what happened at each stage of this session.
+Write in plain English. This helps the candidate understand HOW they learned, not just WHAT they did.
+elcLearningCycle: {
+  concreteExperienceBaseline: string,
+  // What did this session reveal about the candidate's current interview performance level?
+  // One sentence grounding the starting point — what they came in able to do.
+
+  reflectiveObservationInsight: string,
+  // What did the follow-up probe question reveal that the initial answer did not?
+  // This is what reflection unlocked. One sentence, specific to the probe exchange.
+  // If no probe was used, describe what self-reflection the candidate showed.
+
+  abstractPrinciple: string,
+  // The transferable principle this session produced — something the candidate can carry
+  // into any interview, not just this one. One clear sentence.
+  // E.g. "Strong Result statements require a measurable outcome AND a reflection on
+  // what you would do differently — you have the outcome, not yet the reflection."
+
+  experimentationTarget: string
+  // The single thing to TEST in the next session or real interview.
+  // Must be specific enough to know if they did it. One sentence.
+  // E.g. "Lead your next Action section with your decision, not the context — say
+  // 'I decided to...' before explaining why."
+}
+
+── masteryTracker (4A — STAR mastery per component, cross-session consolidation) ──
+masteryTracker: {
+  situation: { status: 'reached' | 'partial' | 'not_reached' },
+  task:      { status: 'reached' | 'partial' | 'not_reached' },
+  action:    { status: 'reached' | 'partial' | 'not_reached' },
+  result:    { status: 'reached' | 'partial' | 'not_reached' },
+  consolidatedComponents: []  // leave empty — injected from cross-session data post-generation
+}
+For each STAR component: 'reached' = fully evidenced in THIS session's transcript; 'partial' = present but incomplete; 'not_reached' = absent.
+${masteryContext}
+
+── calibrationAccuracy (4B — self vs AI rating gap, prior session patterns) ──
+calibrationAccuracy: {
+  candidateSelfRating: string,  // infer from any self-assessment language in transcript (e.g. "I think I explained that well")
+  aiCompetencyRating: string,   // your overall competency level assessment (e.g. "Developing — partial STAR")
+  calibrationGap: 'overestimate' | 'accurate' | 'underestimate',
+  calibrationDirection: string, // plain English: what they got right or wrong about themselves
+  priorSessionGaps: [],          // leave empty — injected from cross-session data post-generation
+  consistentPattern: string      // what pattern of self-calibration do you observe in this session? (1 sentence)
 }
 
 ── biasAndFairnessNote ─────────────────────────────────────────
@@ -500,13 +689,13 @@ text: string
             meritVectors: {
               type: Type.OBJECT,
               properties: {
-                autonomy: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                competence: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                relatedness: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
-                lowestVector: { type: Type.STRING, enum: ['autonomy', 'competence', 'relatedness'] },
+                personalAgency: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
+                skillSpecificity: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
+                impactArticulation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER }, evidenceBasis: { type: Type.STRING } }, required: ["score", "evidenceBasis"] },
+                lowestVector: { type: Type.STRING, enum: ['personalAgency', 'skillSpecificity', 'impactArticulation'] },
                 primarySuggestionAnchor: { type: Type.STRING }
               },
-              required: ["autonomy", "competence", "relatedness", "lowestVector", "primarySuggestionAnchor"]
+              required: ["personalAgency", "skillSpecificity", "impactArticulation", "lowestVector", "primarySuggestionAnchor"]
             },
             professionalSelfVerificationSignals: {
               type: Type.OBJECT,
@@ -581,16 +770,16 @@ text: string
                 "researchNote"
               ]
             },
-            impressionManagementScore: {
+            credibilityFlag: {
               type: Type.OBJECT,
               properties: {
-                frontStageScore: { type: Type.NUMBER },
-                backStageScore: { type: Type.NUMBER },
-                dominantMode: { type: Type.STRING, enum: ['front_stage', 'back_stage', 'balanced'] },
-                authenticitySignal: { type: Type.STRING },
-                feedbackImplication: { type: Type.STRING }
+                triggered: { type: Type.BOOLEAN },
+                cvGrounding: { type: Type.STRING, enum: ['aligned', 'partial', 'absent', 'no_cv'] },
+                jdGrounding: { type: Type.STRING, enum: ['aligned', 'partial', 'absent', 'no_jd'] },
+                flagReason: { type: Type.STRING, nullable: true },
+                researchNote: { type: Type.STRING }
               },
-              required: ["frontStageScore", "backStageScore", "dominantMode", "authenticitySignal", "feedbackImplication"]
+              required: ["triggered", "cvGrounding", "jdGrounding", "researchNote"]
             },
             algorithmicAversionSignal: {
               type: Type.OBJECT,
@@ -615,13 +804,13 @@ text: string
             chcCognitiveDimensions: {
               type: Type.OBJECT,
               properties: {
-                crystallisedIntelligence: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
-                fluidIntelligence: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
-                practicalReasoning: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
-                overallCHCNote: { type: Type.STRING },
+                abstractConceptualisation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
+                activeExperimentation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
+                concreteExperience: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
+                overallELCNote: { type: Type.STRING },
                 researchNote: { type: Type.STRING }
               },
-              required: ["crystallisedIntelligence", "fluidIntelligence", "practicalReasoning", "overallCHCNote", "researchNote"]
+              required: ["abstractConceptualisation", "activeExperimentation", "concreteExperience", "overallELCNote", "researchNote"]
             },
             scaffoldedLearningSignal: {
               type: Type.OBJECT,
@@ -652,6 +841,59 @@ text: string
               },
               required: ["score", "checklist"]
             },
+            masteryTracker: {
+              type: Type.OBJECT,
+              properties: {
+                situation: { type: Type.OBJECT, properties: { status: { type: Type.STRING, enum: ['reached', 'partial', 'not_reached'] } }, required: ["status"] },
+                task:      { type: Type.OBJECT, properties: { status: { type: Type.STRING, enum: ['reached', 'partial', 'not_reached'] } }, required: ["status"] },
+                action:    { type: Type.OBJECT, properties: { status: { type: Type.STRING, enum: ['reached', 'partial', 'not_reached'] } }, required: ["status"] },
+                result:    { type: Type.OBJECT, properties: { status: { type: Type.STRING, enum: ['reached', 'partial', 'not_reached'] } }, required: ["status"] },
+                consolidatedComponents: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["situation", "task", "action", "result", "consolidatedComponents"]
+            },
+            calibrationAccuracy: {
+              type: Type.OBJECT,
+              properties: {
+                candidateSelfRating:  { type: Type.STRING },
+                aiCompetencyRating:   { type: Type.STRING },
+                calibrationGap:       { type: Type.STRING, enum: ['overestimate', 'accurate', 'underestimate'] },
+                calibrationDirection: { type: Type.STRING },
+                priorSessionGaps:     { type: Type.ARRAY, items: { type: Type.STRING } },
+                consistentPattern:    { type: Type.STRING }
+              },
+              required: ["candidateSelfRating", "aiCompetencyRating", "calibrationGap", "calibrationDirection", "priorSessionGaps", "consistentPattern"]
+            },
+            verbalImprovementPlan: {
+              type: Type.OBJECT,
+              properties: {
+                fillerPatterns:  { type: Type.STRING },
+                pacingAssessment: { type: Type.STRING },
+                clarityTargets:  { type: Type.ARRAY, items: { type: Type.STRING } },
+                practiceMethod:  { type: Type.STRING }
+              },
+              required: ["fillerPatterns", "pacingAssessment", "clarityTargets", "practiceMethod"]
+            },
+            hiringProfileAlignment: {
+              type: Type.OBJECT,
+              properties: {
+                whatInterviewersLookFor:    { type: Type.ARRAY, items: { type: Type.STRING } },
+                candidateAlignedStrengths:  { type: Type.ARRAY, items: { type: Type.STRING } },
+                profileGaps:               { type: Type.ARRAY, items: { type: Type.STRING } },
+                priorityFix:               { type: Type.STRING }
+              },
+              required: ["whatInterviewersLookFor", "candidateAlignedStrengths", "profileGaps", "priorityFix"]
+            },
+            elcLearningCycle: {
+              type: Type.OBJECT,
+              properties: {
+                concreteExperienceBaseline:     { type: Type.STRING },
+                reflectiveObservationInsight:   { type: Type.STRING },
+                abstractPrinciple:              { type: Type.STRING },
+                experimentationTarget:          { type: Type.STRING }
+              },
+              required: ["concreteExperienceBaseline", "reflectiveObservationInsight", "abstractPrinciple", "experimentationTarget"]
+            },
             biasAndFairnessNote: { type: Type.STRING },
             integrityViolation: {
               type: Type.OBJECT,
@@ -681,7 +923,6 @@ text: string
             "rubrics",
             "meritVectors",
             "professionalSelfVerificationSignals",
-            "impressionManagementScore",
             "algorithmicAversionSignal",
             "socialIdentityAwareness",
             "chcCognitiveDimensions",
@@ -694,7 +935,25 @@ text: string
       }
     });
 
-    return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+    const parsed = JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+
+    // 4A — Inject cross-session consolidated flags into masteryTracker
+    if (params.mesoAccumulator && parsed.masteryTracker) {
+      const consolidated = masteryConsolidated;
+      (['situation', 'task', 'action', 'result'] as MasteryComponent[]).forEach(c => {
+        if (parsed.masteryTracker[c]) {
+          parsed.masteryTracker[c].consolidated = consolidated.includes(c);
+        }
+      });
+      parsed.masteryTracker.consolidatedComponents = consolidated;
+    }
+
+    // 4B — Inject prior session gaps into calibrationAccuracy
+    if (params.mesoAccumulator && parsed.calibrationAccuracy) {
+      parsed.calibrationAccuracy.priorSessionGaps = priorSessionGaps;
+    }
+
+    return parsed;
   } catch (err) {
     console.error("Failed to generate detailed feedback:", err);
     // Return a structured error object that UI can handle

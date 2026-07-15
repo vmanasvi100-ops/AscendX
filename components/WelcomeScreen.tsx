@@ -4,9 +4,10 @@ import { ShieldCheck, Wand2, ShieldAlert, FileUp, FileCheck, Loader2 } from 'luc
 import { useSettings } from '../context/SettingsContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
-import type { TimerDisplay, TimerFramingCondition, AnalyticsEventType, Question, RubricCriterion } from '../types';
+import type { TimerFramingCondition, AnalyticsEventType, Question, RubricCriterion } from '../types';
 import GuidedCoachMark from './GuidedCoachMark';
 import ResumeCoach from './ResumeCoach';
+import { extractAnonymizedMetadata } from '../utils/anonymizeCV';
 import { generateInitialQuestions, generateJDCVAlignmentQuestions, generateCVCompetencyQuestions, generateJDUnderstandingQuestions } from '../services/questionService';
 import { QUESTION_REPOSITORY } from '../services/questionBank';
 
@@ -70,8 +71,6 @@ const SpeakerIcon = () => (
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
     const {
-        timerDisplay, setTimerDisplay,
-        liveTools, setLiveTools,
         dyslexiaFont, setDyslexiaFont,
         audioCues, setAudioCues,
         coachMarkTheme,
@@ -94,9 +93,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         setQuestionsFinalized,
         setPhase2Started,
         setJdcvAlignmentAnalysis,
+        preSessionAnswer,
+        setPreSessionAnswer,
     } = useSettings();
 
-    const [preSessionAnswer, setPreSessionAnswer] = useState<string | null>(null);
     const [priorSessionHint, setPriorSessionHint] = useState<string | null>(null);
 
     useEffect(() => {
@@ -198,6 +198,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        if (file.size > 5 * 1024 * 1024) {
+            setGenerationError("File too large. Please upload a CV under 5MB.");
+            return;
+        }
         if (file.type !== 'application/pdf') {
             setGenerationError("Please upload a valid PDF file.");
             return;
@@ -220,7 +224,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
             }
 
             setCvText(fullText);
-            logEvent('cv_uploaded', { fileName: file.name, fileSize: file.size });
+
+            // Log only anonymized metadata — never log fileName, fileSize, or any CV text
+            const anonMeta = extractAnonymizedMetadata(fullText);
+            logEvent('cv_uploaded', {
+                cv_uploaded: true,
+                experience_years: anonMeta.experience_years,
+                degree_discipline: anonMeta.degree_discipline,
+                skill_keywords: anonMeta.skill_keywords,
+            });
         } catch (err) {
             console.error("PDF Extraction Error:", err);
             setGenerationError("Failed to extract text from PDF. Please try again or use a different file.");
@@ -281,13 +293,22 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                             setJdcvAlignmentAnalysis(jdCvResult.analysis);
                         }
                     }).catch(err => console.error("Phase 2 question generation failed:", err))
-                    .finally(() => setQuestionsFinalized(true));
+                    .finally(() => {
+                        setQuestionsFinalized(true);
+                        // Privacy: clear full CV text from memory once questions are generated
+                        setCvText('');
+                        setPdfFileName(null);
+                    });
                 });
             } else {
                 phase1Promise.finally(() => setQuestionsFinalized(true));
             }
 
-            logEvent('questions_generated', { count: phase0.length, company: companyName, role: targetRole });
+            // Do not log company/role — they are PII under the analytics validation rules
+            logEvent('questions_generated', {
+                question_source: cvText?.trim() ? 'JD+CV' : 'JD-only',
+                phase0_count: phase0.length,
+            });
         } catch (err) {
             setGenerationError("An error occurred while generating questions.");
         } finally {
@@ -295,7 +316,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         }
     };
 
-    const handleStart = (e: React.FormEvent) => {
+    const handleStart = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!ndaAccepted) {
             setShowNdaError(true);

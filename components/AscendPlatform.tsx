@@ -1,13 +1,14 @@
-
+import { GoogleGenAI } from '@google/genai';
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
-import { RecordingStatus, AnalyticsEventType, TimerDisplay, Question, Probe, ProbeAnalysis, DetailedFeedback, QuestionSummaryReport, TimerFramingCondition } from '../types';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { RecordingStatus, AnalyticsEventType, TimerDisplay, Question, Probe, ProbeAnalysis, DetailedFeedback, QuestionSummaryReport, TimerFramingCondition, SessionRecord, MesoAccumulator, CompetencyDemonstrationLevel, MasteryComponent } from '../types';
 import { generateProbe, analyzeProbeResponse, generateQuestionSummary } from '../services/probingService';
 import { generateDetailedFeedback } from '../services/feedbackService';
 import ProbingPipeline from './ProbingPipeline';
 import ProbingReport from './ProbingReport';
 import QuestionReport from './QuestionReport';
+import ImprovementPlan from './ImprovementPlan';
+import ELCQuestionTrace from './ELCQuestionTrace';
 import { AnimatePresence } from 'motion/react';
 import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, Sparkles, Scale, Layers, ShieldCheck, Target } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -29,23 +30,23 @@ type VideoState = 'standard' | 'hidden';
 type AspectRatio = '9/16' | '2/3' | '3/4' | '4/5' | '3/2' | '16/10' | '16/5' | '16/7' | '20/7';
 
 function buildPlainLanguageSummary(feedback: DetailedFeedback): string {
-    // Priority order: merit vectors → CHC fluid reasoning → scaffold dependency → impression management
+    // Priority order: behavioral evidence vectors → ELC signals → scaffold dependency
     const mv = feedback.meritVectors;
     if (mv) {
-        if (mv.lowestVector === 'autonomy' && mv.autonomy.score < 50)
+        if (mv.lowestVector === 'personalAgency' && mv.personalAgency.score < 50)
             return "your answers didn't clearly show your personal decisions";
-        if (mv.lowestVector === 'competence' && mv.competence.score < 50)
+        if (mv.lowestVector === 'skillSpecificity' && mv.skillSpecificity.score < 50)
             return "your answers needed more specific evidence of your skills";
-        if (mv.lowestVector === 'relatedness' && mv.relatedness.score < 50)
+        if (mv.lowestVector === 'impactArticulation' && mv.impactArticulation.score < 50)
             return "your answers rarely mentioned impact on others";
     }
     const chc = feedback.chcCognitiveDimensions;
     if (chc) {
-        if (chc.fluidIntelligence.score !== null && chc.fluidIntelligence.score < 50)
+        if (chc.activeExperimentation.score !== null && chc.activeExperimentation.score < 50)
             return "your answers found it harder to adapt when questions shifted direction";
-        if (chc.crystallisedIntelligence.score !== null && chc.crystallisedIntelligence.score < 50)
+        if (chc.abstractConceptualisation.score !== null && chc.abstractConceptualisation.score < 50)
             return "your answers lacked specific domain knowledge for this role";
-        if (chc.practicalReasoning.score !== null && chc.practicalReasoning.score < 50)
+        if (chc.concreteExperience.score !== null && chc.concreteExperience.score < 50)
             return "your results lacked numbers or measurable outcomes";
     }
     const sc = feedback.scaffoldedLearningSignal;
@@ -55,9 +56,6 @@ function buildPlainLanguageSummary(feedback: DetailedFeedback): string {
         if (sc.phasingEffectiveness.trajectory === 'declining')
             return "your answers were strongest early and lost structure later";
     }
-    const im = feedback.impressionManagementScore;
-    if (im && im.frontStageScore > 70)
-        return "your answers felt well-rehearsed — try going deeper into what actually happened";
     return feedback.weaknesses?.[0] ?? "keep building on your strengths from last session";
 }
 
@@ -70,14 +68,6 @@ function saveSessionHistory(hint: string): void {
     } catch { /* localStorage unavailable */ }
 }
 
-function encode(bytes: Uint8Array) {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
 
 const Waveform: React.FC<{ active: boolean; scale?: number }> = ({ active, scale = 1 }) => (
     <div className="flex items-end justify-center gap-1.5 h-16" style={{ transform: `scale(${scale})` }}>
@@ -123,7 +113,7 @@ interface AscendPlatformProps {
 }
 
 const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => {
-    const { 
+    const {
         videoEnabled,
         setVideoEnabled,
         dyslexiaFont,
@@ -136,13 +126,24 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         jobDescription,
         timerFramingCondition,
         participantId,
+        condition,
         isTourActive,
         tourStep,
         persistedAuditResult,
         questionsFinalized,
         jdcvAlignmentAnalysis,
         candidateProfile,
+        preSessionAnswer,
+        mesoAccumulator,
+        saveMesoAccumulator,
+        computeMesoDelta,
+        deriveUpdatedCandidateProfile,
     } = useSettings();
+
+    const effectiveCandidateProfile = React.useMemo(() => {
+        const patch = deriveUpdatedCandidateProfile();
+        return patch ? { ...candidateProfile, ...patch } : candidateProfile;
+    }, [candidateProfile, mesoAccumulator]);
     const [starPhase, setStarPhase] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>('idle');
@@ -150,10 +151,10 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [transcript, setTranscript] = useState<string>("");
     const lastPhaseTranscriptLength = useRef<number>(0);
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const sessionPromiseRef = useRef<Promise<any> | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
 
     const [videoState, setVideoState] = useState<VideoState>('standard');
     const [isTimerHidden, setIsTimerHidden] = useState(false);
@@ -191,6 +192,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [activeTab, setActiveTab] = useState<ToolkitTab>('plan');
     const [lastQuestionCompleted, setLastQuestionCompleted] = useState(false);
     const [waitingForMoreQuestions, setWaitingForMoreQuestions] = useState(false);
+    const researcherMode = React.useMemo(() => new URLSearchParams(window.location.search).get('researcher') === 'true', []);
     const waitingAtLength = useRef(0);
     const reflectiveBreakShown = useRef(false); // ensure break only shows once per session
 
@@ -204,7 +206,19 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     ];
 
     useEffect(() => {
-        logEvent('session_start', { mode: 'interview' });
+        logEvent('session_start', {
+            mode: 'interview',
+            timerDisplay,
+            timerFramingCondition,
+            preSessionAnswer,
+            liveTools: {
+                keywordPathfinder: liveTools.keywordPathfinder,
+                fillerWordCounter: liveTools.fillerWordCounter,
+                questionChecklist: liveTools.questionChecklist,
+            },
+            dyslexiaFont,
+            videoEnabled,
+        });
         phaseStartTimestamp.current = Date.now();
     }, []);
 
@@ -381,56 +395,89 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         setIsBreakActive(true);
     };
 
-    const startTranscription = async (mediaStream: MediaStream, retryCount = 0) => {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-
-        try {
-            const sessionPromise = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-                callbacks: {
-                    onopen: () => {
-                        const source = audioContext.createMediaStreamSource(mediaStream);
-                        const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-                        scriptProcessor.onaudioprocess = (e) => {
-                            const inputData = e.inputBuffer.getChannelData(0);
-                            const int16 = new Int16Array(inputData.length);
-                            for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-                            const pcmBlob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-                            sessionPromise.then(session => {
-                                if (session) session.sendRealtimeInput({ media: pcmBlob });
-                            }).catch(err => console.error("Failed to send audio:", err));
-                        };
-                        source.connect(scriptProcessor);
-                        scriptProcessor.connect(audioContext.destination);
-                    },
-                    onmessage: async (message: LiveServerMessage) => {
-                        if (message.serverContent?.inputTranscription) {
-                            setTranscript(prev => prev + message.serverContent.inputTranscription.text);
-                        }
-                    },
-                    onerror: (e) => {
-                        console.error('Transcription error:', e);
-                        if (retryCount < 3 && recordingStatus === 'recording') {
-                            console.log(`Retrying transcription (attempt ${retryCount + 1})...`);
-                            setTimeout(() => startTranscription(mediaStream, retryCount + 1), 1000);
-                        }
-                    },
-                    onclose: () => {
-                        setIsTranscribing(false);
-                        if (audioContext.state !== 'closed') audioContext.close().catch(() => { });
-                    }
-                },
-                config: { responseModalities: [Modality.TEXT], inputAudioTranscription: {} }
-            });
-            sessionPromiseRef.current = sessionPromise;
-            setIsTranscribing(true);
-        } catch (err) {
-            console.error("Failed to connect to transcription service:", err);
-            if (retryCount < 3 && recordingStatus === 'recording') {
-                setTimeout(() => startTranscription(mediaStream, retryCount + 1), 1000);
-            }
+    const encodeWAV = (samples: Float32Array, sampleRate: number): ArrayBuffer => {
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+        const write = (offset: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); };
+        write(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true);
+        write(8, 'WAVE'); write(12, 'fmt '); view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        write(36, 'data'); view.setUint32(40, samples.length * 2, true);
+        let off = 44;
+        for (let i = 0; i < samples.length; i++, off += 2) {
+            const s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
         }
+        return buffer;
+    };
+
+    const startTranscription = (mediaStream: MediaStream) => {
+        setTranscriptionError(null);
+        const sampleRate = 16000;
+        const chunkSamples = sampleRate * 4; // 4-second chunks
+
+        let ctx: AudioContext;
+        try {
+            ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
+        } catch (err: any) {
+            setTranscriptionError(`AudioContext failed: ${err?.message || err}`);
+            return;
+        }
+
+        const source = ctx.createMediaStreamSource(mediaStream);
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+        let accumulated: Float32Array[] = [];
+        let accumulatedLen = 0;
+
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
+
+        const sendChunk = async (samples: Float32Array) => {
+            try {
+                const wav = encodeWAV(samples, sampleRate);
+                const bytes = new Uint8Array(wav);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                const response = await ai.models.generateContent({
+                    model: 'gemini-3-flash-preview',
+                    contents: [{ role: 'user', parts: [
+                        { inlineData: { data: btoa(binary), mimeType: 'audio/wav' } },
+                        { text: 'Transcribe the speech in this audio exactly as spoken. Return only the words, nothing else. If there is no speech, return nothing.' }
+                    ]}]
+                });
+                const text = response.text?.trim();
+                if (text) setTranscript(prev => prev + (prev ? ' ' : '') + text);
+            } catch (err: any) {
+                const msg = err?.message || String(err);
+                console.error('Transcription chunk failed:', msg);
+                setTranscriptionError(msg);
+            }
+        };
+
+        processor.onaudioprocess = (e: AudioProcessingEvent) => {
+            const input = e.inputBuffer.getChannelData(0);
+            accumulated.push(new Float32Array(input));
+            accumulatedLen += input.length;
+            if (accumulatedLen >= chunkSamples) {
+                const combined = new Float32Array(accumulatedLen);
+                let off = 0;
+                for (const buf of accumulated) { combined.set(buf, off); off += buf.length; }
+                accumulated = [];
+                accumulatedLen = 0;
+                sendChunk(combined);
+            }
+        };
+
+        const silentGain = ctx.createGain();
+        silentGain.gain.value = 0;
+        source.connect(processor);
+        processor.connect(silentGain);
+        silentGain.connect(ctx.destination);
+
+        audioContextRef.current = ctx;
+        setIsTranscribing(true);
     };
 
     const handleRecord = async () => {
@@ -448,7 +495,10 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
             startTranscription(stream);
         } else {
             setRecordingStatus('idle');
-            if (sessionPromiseRef.current) (await sessionPromiseRef.current).close();
+            if (audioContextRef.current) {
+                audioContextRef.current.close().catch(() => {});
+                audioContextRef.current = null;
+            }
             setIsTranscribing(false);
 
             // Trigger Analysis if probing is active
@@ -485,10 +535,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 priorProbesThisQuestion: probeHistory.join(' | '),
                 candidateAnswer: transcript.slice(lastPhaseTranscriptLength.current),
                 conversationHistory: transcript.slice(-500),
-                candidateProfile,
+                candidateProfile: effectiveCandidateProfile,
+                mesoAccumulator,
             });
             setCurrentProbe(probe);
             setProbeHistory(prev => [...prev, probe.probe]);
+            logEvent('probe_used', { questionIndex: currentQuestionIndex, starPhase, probeType: probe.probe_type });
         } catch (err) {
             console.error("Failed to generate probe:", err);
         } finally {
@@ -841,12 +893,54 @@ if (recordingStatus === 'recording') await handleRecord();
                 probeAnalysis: probeAnalysis ? JSON.stringify(probeAnalysis) : undefined,
                 targetRole,
                 companyName,
-                condition: 'standard',
+                condition,
                 phaseProgression: `${currentQuestionIndex + 1} of ${activeQuestions.length} questions completed`,
-                candidateProfile,
+                candidateProfile: effectiveCandidateProfile,
+                mesoAccumulator,
             });
             setDetailedFeedback(feedback);
             saveSessionHistory(buildPlainLanguageSummary(feedback));
+            // ── Wire cross-session ELC tracking: build SessionRecord from this session ──
+            const scoreToLevel = (s: number): CompetencyDemonstrationLevel =>
+              s >= 5 ? 'Advanced' : s >= 4 ? 'Established' : s >= 3 ? 'Developing' : 'Emerging';
+            const mt = feedback.masteryTracker;
+            const starReached: MasteryComponent[] = mt
+              ? (['situation', 'task', 'action', 'result'] as MasteryComponent[]).filter(c => mt[c]?.status === 'reached')
+              : (['situation', 'task', 'action', 'result'] as MasteryComponent[]).slice(0, Math.min(feedback.rubrics?.starCompletion ?? 0, 4));
+            const record: SessionRecord = {
+              sessionId: `${participantId}_${Date.now()}`,
+              timestamp: Date.now(),
+              condition,
+              competencyLevels: [scoreToLevel(feedback.rubrics?.starCompletion ?? 1)],
+              scaffoldDependencyScore: feedback.scaffoldedLearningSignal?.scaffoldDependency?.score ?? 50,
+              regulatoryFocus: (candidateProfile?.regulatoryFocus as any) ?? 'unclear',
+              feedbackOrientation: (candidateProfile?.seeksFeedback as any) ?? 'uncertain',
+              anxietyLevel: (candidateProfile?.anxietyLevel as any) ?? 'mild',
+              selfReportedAnxietyLevel: preSessionAnswer ?? '',
+              forwardOrientationNotes: feedback.careerDevelopment?.nextSteps ?? [],
+              starComponentsReached: starReached,
+            };
+            const updatedSessions = [...(mesoAccumulator?.sessions ?? []), record];
+            const updatedMeso = {
+              participantId,
+              sessions: updatedSessions,
+              delta: computeMesoDelta(updatedSessions),
+              lastUpdated: Date.now(),
+            };
+            saveMesoAccumulator(updatedMeso);
+            fetch('/api/sessions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                participantId,
+                companyName,
+                targetRole,
+                jobDescription,
+                cvText,
+                settings: { condition },
+                questions: activeQuestions.map(q => ({ text: q.text, competency: q.competency })),
+              }),
+            }).catch(() => {});
         } catch (err) {
             console.error("Failed to generate final feedback:", err);
         } finally {
@@ -949,16 +1043,16 @@ Missing: ${detailedFeedback.keywordCoverage.missing.join(', ')}
 ## 8. ACTIONABLE REMEDIATION
 ${detailedFeedback.actionableSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
-## 9. CHC COGNITIVE SIGNALS (McGrew, 2009)
-${detailedFeedback.chcCognitiveDimensions ? `- Crystallised Intelligence (Gc): ${detailedFeedback.chcCognitiveDimensions.crystallisedIntelligence?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.crystallisedIntelligence?.evidenceBasis || ''}
-- Fluid Intelligence (Gf):       ${detailedFeedback.chcCognitiveDimensions.fluidIntelligence?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.fluidIntelligence?.evidenceBasis || ''}
-- Practical Reasoning (Gq):      ${detailedFeedback.chcCognitiveDimensions.practicalReasoning?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.practicalReasoning?.evidenceBasis || ''}
-Note: ${detailedFeedback.chcCognitiveDimensions.overallCHCNote || 'N/A'}` : 'CHC data unavailable.'}
+## 9. KOLB ELC STAGE SIGNALS (Process Overlap Theory — Kovacs & Conway, 2016)
+${detailedFeedback.chcCognitiveDimensions ? `- Abstract Conceptualisation: ${detailedFeedback.chcCognitiveDimensions.abstractConceptualisation?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.abstractConceptualisation?.evidenceBasis || ''}
+- Active Experimentation:     ${detailedFeedback.chcCognitiveDimensions.activeExperimentation?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.activeExperimentation?.evidenceBasis || ''}
+- Concrete Experience:        ${detailedFeedback.chcCognitiveDimensions.concreteExperience?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.concreteExperience?.evidenceBasis || ''}
+Note: ${detailedFeedback.chcCognitiveDimensions.overallELCNote || 'N/A'}` : 'ELC stage signal data unavailable.'}
 
-## 10. SDT MERIT VECTORS (Deci & Ryan, 2000)
-${detailedFeedback.meritVectors ? `- Autonomy:   ${detailedFeedback.meritVectors.autonomy.score}/100 — ${detailedFeedback.meritVectors.autonomy.evidenceBasis}
-- Competence: ${detailedFeedback.meritVectors.competence.score}/100 — ${detailedFeedback.meritVectors.competence.evidenceBasis}
-- Relatedness:${detailedFeedback.meritVectors.relatedness.score}/100 — ${detailedFeedback.meritVectors.relatedness.evidenceBasis}` : 'SDT data unavailable.'}
+## 10. BEHAVIORAL EVIDENCE VECTORS (Levashina & Campion 2007; Ericsson 2016)
+${detailedFeedback.meritVectors ? `- Personal Agency:      ${detailedFeedback.meritVectors.personalAgency.score}/100 — ${detailedFeedback.meritVectors.personalAgency.evidenceBasis}
+- Skill Specificity:   ${detailedFeedback.meritVectors.skillSpecificity.score}/100 — ${detailedFeedback.meritVectors.skillSpecificity.evidenceBasis}
+- Impact Articulation: ${detailedFeedback.meritVectors.impactArticulation.score}/100 — ${detailedFeedback.meritVectors.impactArticulation.evidenceBasis}` : 'Evidence vector data unavailable.'}
 
 ## 11. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
 ${detailedFeedback.professionalSelfVerificationSignals ? `- Voice (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.voice?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.voice?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.voice?.evidenceBasis || ''}
@@ -980,7 +1074,7 @@ Recommended Certs: ${detailedFeedback.careerDevelopment.certifications.join(', '
 Next Steps:        ${detailedFeedback.careerDevelopment.nextSteps.join(', ')}
 
 ## 14. RESEARCH SIGNALS
-- Algorithmic Aversion: ${detailedFeedback.algorithmicAversionSignal?.aversionDetected ? 'DETECTED' : 'Not Detected'} — ${detailedFeedback.algorithmicAversionSignal?.aversionEvidence || 'No evidence.'}
+- AI Trust Calibration: ${detailedFeedback.algorithmicAversionSignal?.aversionDetected ? 'Scepticism detected' : 'No scepticism detected'} — ${detailedFeedback.algorithmicAversionSignal?.aversionEvidence || 'No evidence.'}
 - Social Identity:     ${detailedFeedback.socialIdentityAwareness?.activated ? `Active (${detailedFeedback.socialIdentityAwareness.dominantMotivation || 'Balanced'})` : 'Inactive'} — ${detailedFeedback.socialIdentityAwareness?.scopeNote}
 
 ## 15. INTEGRITY & SAFETY AUDIT
@@ -1008,6 +1102,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
 
 
     if (waitingForMoreQuestions) {
+        const breakTarget = [...sessionLog].reverse().find(e => e.summaryReport?.breakContextGap)?.summaryReport?.breakContextGap ?? null;
         return (
             <div className="min-h-screen w-screen bg-slate-950 flex flex-col items-center justify-center gap-10 animate-fade-in">
                 <div className="text-center space-y-4 max-w-lg px-8">
@@ -1017,18 +1112,30 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                         Your next personalised questions are being prepared. Use this moment to reflect on what you've covered and reset your focus.
                     </p>
                 </div>
-                <div className="space-y-3 max-w-sm w-full px-8">
-                    {[
-                        "Structure every answer: Situation → Task → Action → Result",
-                        "Be specific — real examples beat general statements",
-                        "Take your time. Silence before speaking is a strength",
-                    ].map((tip, i) => (
-                        <div key={i} className="flex items-start gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
-                            <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full mt-1.5 shrink-0" />
-                            <p className="text-xs font-medium text-slate-300">{tip}</p>
+
+                {breakTarget ? (
+                    <div className="max-w-sm w-full px-8 space-y-3">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 text-center">Your target going into the next block</p>
+                        <div className="p-5 bg-indigo-950/60 rounded-2xl border border-indigo-500/30">
+                            <p className="text-sm font-medium text-white leading-relaxed">{breakTarget}</p>
                         </div>
-                    ))}
-                </div>
+                        <p className="text-[9px] font-medium text-slate-500 text-center">Hold this in mind before your next answer.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-3 max-w-sm w-full px-8">
+                        {[
+                            "Structure every answer: Situation → Task → Action → Result",
+                            "Be specific — real examples beat general statements",
+                            "Take your time. Silence before speaking is a strength",
+                        ].map((tip, i) => (
+                            <div key={i} className="flex items-start gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
+                                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full mt-1.5 shrink-0" />
+                                <p className="text-xs font-medium text-slate-300">{tip}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 <div className="flex items-center gap-2 text-slate-600 text-[10px] font-black uppercase tracking-widest">
                     <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
                     Preparing your next questions...
@@ -1100,6 +1207,21 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                             </div>
                         </div>
                     ) : detailedFeedback ? (
+                        <>
+                        {/* Priority Action — one thing to walk away with */}
+                        {(() => {
+                            const priority = detailedFeedback.hiringProfileAlignment?.priorityFix
+                                ?? detailedFeedback.meritVectors?.primarySuggestionAnchor
+                                ?? detailedFeedback.actionableSuggestions?.[0]
+                                ?? null;
+                            return priority ? (
+                                <div className="mb-8 p-6 bg-slate-900 rounded-[32px] border border-indigo-500/30">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-2">Your One Priority</p>
+                                    <p className="text-base font-bold text-white leading-relaxed">{priority}</p>
+                                    <p className="text-[9px] font-medium text-slate-500 mt-3">Everything below supports this. Start here.</p>
+                                </div>
+                            ) : null;
+                        })()}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             {/* Left Column: Summary & Rubrics */}
                             <div className="md:col-span-2 space-y-8">
@@ -1166,6 +1288,35 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </div>
                                 </section>
 
+                                {/* STAR Mastery Progress — candidate-facing */}
+                                {detailedFeedback.masteryTracker && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <CheckCircle2 size={16} /> STAR Component Progress
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Which components you consistently demonstrate — consolidated across sessions</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {(['situation', 'task', 'action', 'result'] as const).map(c => {
+                                                const comp = detailedFeedback.masteryTracker![c];
+                                                const colors = {
+                                                    reached: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+                                                    partial: 'bg-amber-50 border-amber-200 text-amber-700',
+                                                    not_reached: 'bg-slate-50 border-slate-200 text-slate-500',
+                                                };
+                                                return (
+                                                    <div key={c} className={`p-4 rounded-2xl border ${colors[comp.status]}`}>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className="text-[9px] font-black uppercase tracking-widest">{c}</span>
+                                                            {comp.consolidated && <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[8px] font-black rounded-full uppercase">Consolidated</span>}
+                                                        </div>
+                                                        <p className="text-[9px] font-medium capitalize">{comp.status.replace('_', ' ')}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </section>
+                                )}
+
                                 <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-6 flex items-center gap-2">
                                         <ShieldAlert size={16} /> Keyword Coverage
@@ -1225,18 +1376,18 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 </div>
 
-                                {/* CHC Cognitive Signals */}
-                                {detailedFeedback.chcCognitiveDimensions && (
+                                {/* Layer B — researcher only */}
+                                {researcherMode && detailedFeedback.chcCognitiveDimensions && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm" id="report-chc-clusters">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
-                                            <Brain size={16} /> CHC Cognitive Signals
+                                            <Brain size={16} /> Cognitive Process Signals
                                         </h3>
-                                        <p className="text-[9px] font-medium text-slate-400 mb-6">McGrew (2009) — AI-generated proxy, exploratory</p>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Process Overlap Theory (Kovacs & Conway, 2016) — exploratory proxy</p>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                             {([
-                                                { key: 'crystallisedIntelligence', label: 'Crystallised (Gc)', color: 'indigo' },
-                                                { key: 'fluidIntelligence', label: 'Fluid (Gf)', color: 'violet' },
-                                                { key: 'practicalReasoning', label: 'Practical (Gq)', color: 'blue' },
+                                                { key: 'abstractConceptualisation', label: 'Abstract Conceptualisation', color: 'indigo' },
+                                                { key: 'activeExperimentation', label: 'Active Experimentation', color: 'violet' },
+                                                { key: 'concreteExperience', label: 'Concrete Experience', color: 'blue' },
                                             ] as const).map(({ key, label }) => {
                                                 const dim = detailedFeedback.chcCognitiveDimensions![key];
                                                 const score = dim?.score ?? null;
@@ -1255,23 +1406,22 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 );
                                             })}
                                         </div>
-                                        {detailedFeedback.chcCognitiveDimensions.overallCHCNote && (
+                                        {detailedFeedback.chcCognitiveDimensions.overallELCNote && (
                                             <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                                                <p className="text-[10px] font-medium text-indigo-800 italic">{detailedFeedback.chcCognitiveDimensions.overallCHCNote}</p>
+                                                <p className="text-[10px] font-medium text-indigo-800 italic">{detailedFeedback.chcCognitiveDimensions.overallELCNote}</p>
                                             </div>
                                         )}
                                     </section>
                                 )}
 
-                                {/* SDT Merit Vectors */}
-                                {detailedFeedback.meritVectors && (
+                                {researcherMode && detailedFeedback.meritVectors && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
-                                            <TrendingUp size={16} /> SDT Merit Vectors
+                                            <TrendingUp size={16} /> Behavioral Evidence Vectors
                                         </h3>
-                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Deci & Ryan (2000) — Self-Determination Theory</p>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Levashina & Campion (2007) · Ericsson (2016) — Session performance indicators</p>
                                         <div className="space-y-4">
-                                            {(['autonomy', 'competence', 'relatedness'] as const).map((key) => {
+                                            {(['personalAgency', 'skillSpecificity', 'impactArticulation'] as const).map((key) => {
                                                 const v = detailedFeedback.meritVectors?.[key];
                                                 if (!v) return null;
                                                 const lowest = detailedFeedback.meritVectors?.lowestVector === key;
@@ -1279,7 +1429,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                     <div key={key} className={`p-4 rounded-2xl border ${lowest ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'}`}>
                                                         <div className="flex justify-between items-center mb-2">
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 capitalize">{key}</span>
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{{ personalAgency: 'Personal Agency', skillSpecificity: 'Skill Specificity', impactArticulation: 'Impact Articulation' }[key]}</span>
                                                                 {lowest && <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[8px] font-black uppercase tracking-widest rounded-full">Priority</span>}
                                                             </div>
                                                             <span className={`text-base font-black ${lowest ? 'text-rose-600' : 'text-indigo-600'}`}>{v.score}</span>
@@ -1295,41 +1445,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 )}
 
-                                {/* Goffman Impression Management */}
-                                {detailedFeedback.impressionManagementScore && (
-                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
-                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
-                                            <Award size={16} /> Impression Management
-                                        </h3>
-                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Goffman (1959) — Front-Stage vs. Back-Stage</p>
-                                        <div className="grid grid-cols-2 gap-4 mb-4">
-                                            {[{ label: 'Front Stage', key: 'frontStageScore' as const, desc: 'Polished, professional' },
-                                            { label: 'Back Stage', key: 'backStageScore' as const, desc: 'Authentic, genuine' }].map(({ label, key, desc }) => {
-                                                const score = detailedFeedback.impressionManagementScore?.[key] ?? 0;
-                                                return (
-                                                    <div key={key} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
-                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
-                                                        <p className="text-[9px] text-slate-400 mb-3">{desc}</p>
-                                                        <span className="text-3xl font-black text-indigo-600">{score}</span>
-                                                        <span className="text-slate-300 font-bold text-sm">/100</span>
-                                                        <div className="mt-2 h-1.5 bg-slate-200 rounded-full">
-                                                            <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${score}%` }} />
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        {detailedFeedback.impressionManagementScore && (
-                                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Dominant Mode: {detailedFeedback.impressionManagementScore.dominantMode?.replace(/_/g, ' ') || 'N/A'}</p>
-                                                <p className="text-[10px] font-medium text-indigo-800">{detailedFeedback.impressionManagementScore.feedbackImplication}</p>
-                                            </div>
-                                        )}
-                                    </section>
-                                )}
-
-                                {/* Professional Self-Verification Signals */}
-                                {detailedFeedback.professionalSelfVerificationSignals && (
+                                {researcherMode && detailedFeedback.professionalSelfVerificationSignals && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
                                             <Award size={16} /> Professional Self-Verification
@@ -1380,8 +1496,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 )}
 
-                                {/* Vygotsky Scaffolded Learning */}
-                                {detailedFeedback.scaffoldedLearningSignal && (
+                                {researcherMode && detailedFeedback.scaffoldedLearningSignal && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
                                             <Layers size={16} /> Scaffolded Learning
@@ -1410,8 +1525,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </section>
                                 )}
 
-                                {/* Algorithmic Aversion & Social Identity */}
-                                {(detailedFeedback.algorithmicAversionSignal || detailedFeedback.socialIdentityAwareness) && (
+                                {researcherMode && (detailedFeedback.algorithmicAversionSignal || detailedFeedback.socialIdentityAwareness) && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-6 flex items-center gap-2">
                                             <ShieldCheck size={16} /> Research Guardrails
@@ -1419,7 +1533,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                             {detailedFeedback.algorithmicAversionSignal && (
                                                 <div className={`p-5 rounded-2xl border ${detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
-                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Algorithmic Aversion</p>
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">AI Trust Calibration</p>
                                                     <div className="flex items-center gap-2 mb-3">
                                                         <div className={`w-2 h-2 rounded-full ${detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                                                         <span className="text-xs font-black uppercase">{detailedFeedback.algorithmicAversionSignal.aversionDetected ? 'Detected' : 'Clear'}</span>
@@ -1440,6 +1554,41 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 </div>
                                             )}
                                         </div>
+                                    </section>
+                                )}
+
+                                {/* Calibration Accuracy — researcher only */}
+                                {researcherMode && detailedFeedback.calibrationAccuracy && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                            <Scale size={16} /> Self-Calibration Accuracy
+                                        </h3>
+                                        <p className="text-[9px] font-medium text-slate-400 mb-6">Candidate self-rating vs. AI competency rating — calibration gap signal</p>
+                                        <div className="grid grid-cols-2 gap-4 mb-4">
+                                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Candidate Self-Rating</p>
+                                                <p className="text-sm font-bold text-slate-800">{detailedFeedback.calibrationAccuracy.candidateSelfRating}</p>
+                                            </div>
+                                            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">AI Competency Rating</p>
+                                                <p className="text-sm font-bold text-indigo-800">{detailedFeedback.calibrationAccuracy.aiCompetencyRating}</p>
+                                            </div>
+                                        </div>
+                                        <div className={`p-4 rounded-2xl border mb-4 ${detailedFeedback.calibrationAccuracy.calibrationGap === 'overestimate' ? 'bg-rose-50 border-rose-200' : detailedFeedback.calibrationAccuracy.calibrationGap === 'underestimate' ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Calibration Gap — <span className="capitalize">{detailedFeedback.calibrationAccuracy.calibrationGap}</span></p>
+                                            <p className="text-[10px] font-medium text-slate-700 leading-relaxed">{detailedFeedback.calibrationAccuracy.calibrationDirection}</p>
+                                        </div>
+                                        {detailedFeedback.calibrationAccuracy.priorSessionGaps.length > 0 && (
+                                            <div className="mb-4">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Recurring Gaps (Cross-Session)</p>
+                                                <ul className="space-y-1">
+                                                    {detailedFeedback.calibrationAccuracy.priorSessionGaps.map((g, i) => (
+                                                        <li key={i} className="text-[10px] font-medium text-slate-600 flex gap-2"><span className="text-slate-400">→</span>{g}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        <p className="text-[10px] font-medium text-slate-500 italic">{detailedFeedback.calibrationAccuracy.consistentPattern}</p>
                                     </section>
                                 )}
 
@@ -1671,23 +1820,27 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </ul>
                                 </section>
 
-                                <section className="bg-amber-50 p-6 rounded-[32px] border border-amber-100">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Bias & Fairness Audit</h4>
-                                    <p className="text-[11px] font-medium text-amber-800 leading-relaxed italic">
-                                        "{detailedFeedback.biasAndFairnessNote}"
-                                    </p>
-                                </section>
-
-                                <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
-                                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-6 flex items-center gap-2">
-                                        <BookOpen size={16} /> Interview Transcript
-                                    </h3>
-                                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 max-h-96 overflow-y-auto custom-scrollbar">
-                                        <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
-                                            {typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.maskedTranscript as any)?.text : detailedFeedback.maskedTranscript || transcript || "No transcript data available."}
+                                {researcherMode && (
+                                    <section className="bg-amber-50 p-6 rounded-[32px] border border-amber-100">
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">Bias & Fairness Audit</h4>
+                                        <p className="text-[11px] font-medium text-amber-800 leading-relaxed italic">
+                                            "{detailedFeedback.biasAndFairnessNote}"
                                         </p>
-                                    </div>
-                                </section>
+                                    </section>
+                                )}
+
+                                {researcherMode && (
+                                    <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-6 flex items-center gap-2">
+                                            <BookOpen size={16} /> Interview Transcript (Masked)
+                                        </h3>
+                                        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 max-h-96 overflow-y-auto custom-scrollbar">
+                                            <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
+                                                {typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.maskedTranscript as any)?.text : detailedFeedback.maskedTranscript || transcript || "No transcript data available."}
+                                            </p>
+                                        </div>
+                                    </section>
+                                )}
 
                                 <div className="flex flex-col gap-4 no-print">
                                     <button onClick={() => window.location.reload()} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-indigo-900/20 hover:bg-indigo-700 transition-all">
@@ -1699,6 +1852,8 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 </div>
                             </div>
                         </div>
+                        <ImprovementPlan feedback={detailedFeedback} />
+                        </>
                     ) : (
                         <div className="text-center py-20">
                             <p className="text-slate-500 font-bold uppercase tracking-widest">Failed to load detailed audit.</p>
@@ -1815,7 +1970,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                             <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-2">
                                     <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{CATEGORIES[currentQuestionIndex] || 'General Coherence'}</span>
-                                    {currentQuestion.difficulty && (
+                                    {condition !== 'minimal' && currentQuestion.difficulty && (
                                         <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter ${currentQuestion.difficulty === 'easy' ? 'bg-emerald-100 text-emerald-700' :
                                             currentQuestion.difficulty === 'medium' ? 'bg-amber-100 text-amber-700' :
                                                 'bg-rose-100 text-rose-700'
@@ -1823,13 +1978,17 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                             {currentQuestion.difficulty}
                                         </span>
                                     )}
-                                    <span className="text-[9px] font-black text-slate-400 tabular-nums">{currentQuestionIndex + 1}/{activeQuestions.length}</span>
+                                    {condition !== 'minimal' && (
+                                        <span className="text-[9px] font-black text-slate-400 tabular-nums">{currentQuestionIndex + 1}/{activeQuestions.length}</span>
+                                    )}
                                 </div>
-                                <div id="ascend-phase-indicators" className="flex gap-1.5">
-                                    {STAR_LABELS.map((_, i) => (
-                                        <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${starPhase === i ? 'w-10 bg-indigo-600 shadow-sm' : 'w-2 bg-slate-200'}`} />
-                                    ))}
-                                </div>
+                                {condition !== 'minimal' && (
+                                    <div id="ascend-phase-indicators" className="flex gap-1.5">
+                                        {STAR_LABELS.map((_, i) => (
+                                            <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${starPhase === i ? 'w-10 bg-indigo-600 shadow-sm' : 'w-2 bg-slate-200'}`} />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1886,7 +2045,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                     ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center gap-8 bg-slate-50 text-center p-8">
                             <Waveform active={recordingStatus === 'recording'} scale={1.2} />
-                            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400">Video Hidden ΓÇó Speak when ready</p>
+                            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400">Video Hidden Speak when ready</p>
                         </div>
                     )}
                 </div>
@@ -2023,6 +2182,27 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 </p>
                                             )}
 
+                                            {/* Keyword Pathfinder — scaffolded condition only */}
+                                            {liveTools.keywordPathfinder && currentQuestion.keywords?.length > 0 && (
+                                                <div className="mb-4 p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-2">Keywords to hit</p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {currentQuestion.keywords.map(kw => {
+                                                            const hit = transcript.toLowerCase().includes(kw.toLowerCase());
+                                                            return (
+                                                                <span key={kw} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                                                                    hit
+                                                                        ? 'bg-emerald-100 text-emerald-700 line-through opacity-60'
+                                                                        : 'bg-white border border-indigo-200 text-indigo-600'
+                                                                }`}>
+                                                                    {hit ? '✓ ' : ''}{kw}
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             <div className="space-y-3">
                                                 {currentQuestion.requirements.map((req, idx) => (
                                                     <div key={req.id} className="flex items-start gap-3">
@@ -2058,11 +2238,13 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                                     {SITUATIONAL_PHASE_LABELS[idx]}
                                                                 </p>
                                                             )}
-                                                            <p className={`text-[11px] font-medium leading-tight mt-0.5 ${
-                                                                idx === starPhase ? 'text-slate-900' : 'text-slate-400'
-                                                            }`}>
-                                                                {req.text}
-                                                            </p>
+                                                            {liveTools.questionChecklist && (
+                                                                <p className={`text-[11px] font-medium leading-tight mt-0.5 ${
+                                                                    idx === starPhase ? 'text-slate-900' : 'text-slate-400'
+                                                                }`}>
+                                                                    {req.text}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 ))}
@@ -2179,11 +2361,15 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 <div className="h-full flex flex-col animate-fade-in">
                                     <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Live Transcript</h4>
                                     <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-y-auto custom-scrollbar">
-                                        <p className="text-[11px] font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
-                                            {transcript || "Awaiting verbal input..."}
-                                        </p>
+                                        {transcriptionError ? (
+                                            <p className="text-[11px] font-bold text-rose-600 leading-relaxed">{transcriptionError}</p>
+                                        ) : (
+                                            <p className="text-[11px] font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
+                                                {transcript || "Awaiting verbal input..."}
+                                            </p>
+                                        )}
                                     </div>
-                                    {isTranscribing && (
+                                    {isTranscribing && !transcriptionError && (
                                         <div className="flex items-center justify-center gap-2 mt-3">
                                             <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
                                             <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Listening...</span>
@@ -2351,6 +2537,11 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                                 <p className="text-[11px] font-bold text-white leading-snug">{entry.summaryReport.practiceTask}</p>
                                                             </div>
                                                         )}
+
+                                                        {/* Per-question Kolb ELC stage trace */}
+                                                        {entry.summaryReport.elcStages && (
+                                                            <ELCQuestionTrace stages={entry.summaryReport.elcStages} />
+                                                        )}
                                                     </div>
                                                 ) : entry.probeAnalysis ? (
                                                     /* Fallback: pill summary while report generates */
@@ -2419,17 +2610,20 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                 .custom-scrollbar::-webkit-scrollbar{width:4px}
                 .custom-scrollbar::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:10px}
                 @media print {
+                    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
                     .no-print { display: none !important; }
                     body { background: white !important; }
-                    .min-h-screen { min-height: auto !important; height: auto !important; overflow: visible !important; }
+
+                    /* Expand every scrollable/clipped container so nothing is cut off */
+                    * { overflow: visible !important; max-height: none !important; height: auto !important; }
+                    .min-h-screen { min-height: auto !important; }
+
                     .max-w-7xl { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-                    .shadow-sm, .shadow-xl, .shadow-2xl { shadow: none !important; box-shadow: none !important; }
-                    .rounded-[40px], .rounded-3xl, .rounded-2xl { border-radius: 8px !important; }
+                    .shadow-sm, .shadow-xl, .shadow-2xl { box-shadow: none !important; }
+                    .rounded-\[40px\], .rounded-3xl, .rounded-2xl { border-radius: 8px !important; }
                     button { display: none !important; }
-                    .bg-slate-50, .bg-slate-100 { background: white !important; }
                     .border { border: 1px solid #e2e8f0 !important; }
                     .text-indigo-600 { color: #4f46e5 !important; }
-                    .bg-slate-900 { background: #0f172a !important; color: white !important; }
                     .p-8 { padding: 1.5rem !important; }
                     .gap-8 { gap: 1rem !important; }
                     .grid { display: block !important; }

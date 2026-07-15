@@ -1,17 +1,20 @@
 
 import React, { useState, useMemo } from 'react';
-import { AlertTriangle, Globe, ShieldCheck, ExternalLink } from 'lucide-react';
+import { AlertTriangle, Globe, ShieldCheck, ExternalLink, Link, Copy, Check } from 'lucide-react';
 import { AnalyticsEvent } from '../types';
 
 interface ProductDashboardProps {
     events: AnalyticsEvent[];
     onClose: () => void;
+    onClearAll?: () => void;
+    onClearParticipant?: (participantId: string) => void;
 }
 
-type DashboardTab = 'participants' | 'funnel' | 'architecture' | 'adoption' | 'engagement' | 'costs' | 'raw_data';
+type DashboardTab = 'links' | 'participants' | 'funnel' | 'architecture' | 'adoption' | 'engagement' | 'costs' | 'raw_data';
 
-const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) => {
-    const [activeTab, setActiveTab] = useState<DashboardTab>('funnel');
+const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, onClearAll, onClearParticipant }) => {
+    const [activeTab, setActiveTab] = useState<DashboardTab>('links');
+    const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
     // --- Statistical Utilities ---
     const getMedian = (values: number[]) => {
@@ -100,9 +103,15 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
     };
 
     const handleClearLog = () => {
-        if (window.confirm("Are you sure you want to delete all historical participant data?")) {
+        if (window.confirm("Delete ALL participant data? This cannot be undone.")) {
             localStorage.removeItem('ascend_global_event_log');
-            window.location.reload();
+            onClearAll?.();
+        }
+    };
+
+    const handleClearParticipant = (participantId: string) => {
+        if (window.confirm(`Remove all data for participant ${participantId}?`)) {
+            onClearParticipant?.(participantId);
         }
     };
 
@@ -132,6 +141,12 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
             moderate: 'Struggle to find the right words',
             high: 'Go blank and need a moment to reset',
         },
+        seeksFeedback: {
+            proactive: 'I actively ask for it — from peers, mentors, or anyone I trust',
+            responsive: 'I wait until feedback is offered, then I use it',
+            avoidant: 'I tend to avoid it — it can feel uncomfortable',
+            uncertain: "I'm not sure I have a consistent pattern",
+        },
     };
 
     const verbatim = (dimension: string, key: string) =>
@@ -142,12 +157,20 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
         const map = new Map<string, {
             participantId: string;
             condition: string;
+            timerDisplay: string;
+            timerPreferenceAnswer: string;
+            dyslexiaFont: string;
+            liveTools: string;
+            cvUploaded: string;
             experience: string;
             feedbackLiteracy: string;
+            seeksFeedback: string;
             regulatoryFocus: string;
             anxietyLevel: string;
             sessionsStarted: number;
             sessionsCompleted: number;
+            questionsAnswered: number;
+            totalProbes: number;
             firstSeen: number;
             lastSeen: number;
         }>();
@@ -158,42 +181,85 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                 map.set(pid, {
                     participantId: pid,
                     condition: e.condition ?? '—',
+                    timerDisplay: '—', timerPreferenceAnswer: '—', dyslexiaFont: '—', liveTools: '—',
+                    cvUploaded: '—',
                     experience: '—', feedbackLiteracy: '—',
-                    regulatoryFocus: '—', anxietyLevel: '—',
+                    seeksFeedback: '—', regulatoryFocus: '—', anxietyLevel: '—',
                     sessionsStarted: 0, sessionsCompleted: 0,
+                    questionsAnswered: 0, totalProbes: 0,
                     firstSeen: e.timestamp, lastSeen: e.timestamp,
                 });
             }
             const row = map.get(pid)!;
             if (e.timestamp < row.firstSeen) row.firstSeen = e.timestamp;
             if (e.timestamp > row.lastSeen) row.lastSeen = e.timestamp;
+            if (e.type === 'session_start' && e.metadata) {
+                row.timerDisplay = e.metadata.timerDisplay ?? '—';
+                row.timerPreferenceAnswer = e.metadata.preSessionAnswer ?? '—';
+                row.dyslexiaFont = e.metadata.dyslexiaFont === true ? 'Yes' : e.metadata.dyslexiaFont === false ? 'No' : '—';
+                const lt = e.metadata.liveTools ?? {};
+                const enabled = [
+                    lt.keywordPathfinder && 'Keyword',
+                    lt.fillerWordCounter && 'Filler',
+                    lt.questionChecklist && 'Checklist',
+                ].filter(Boolean).join(', ');
+                row.liveTools = enabled || 'None';
+            }
+            if (e.type === 'cv_uploaded') row.cvUploaded = 'Yes';
+            if (e.type === 'cv_upload_declined' && row.cvUploaded === '—') row.cvUploaded = 'No';
             if (e.type === 'profile_submitted' && e.metadata) {
                 row.experience = e.metadata.experience ?? '—';
                 row.feedbackLiteracy = e.metadata.feedbackLiteracy ?? '—';
+                row.seeksFeedback = e.metadata.seeksFeedback ?? '—';
                 row.regulatoryFocus = e.metadata.regulatoryFocus ?? '—';
                 row.anxietyLevel = e.metadata.anxietyLevel ?? '—';
             }
             if (e.type === 'session_start') row.sessionsStarted += 1;
             if (e.type === 'session_complete') row.sessionsCompleted += 1;
+            if (e.type === 'phase_complete' && e.metadata?.phase === 'Result') row.questionsAnswered += 1;
+            if (e.type === 'probe_used') row.totalProbes += 1;
         }
 
         return Array.from(map.values()).sort((a, b) => b.lastSeen - a.lastSeen);
     }, [events]);
 
     const handleExportCSV = () => {
-        const headers = ['Participant ID', 'Condition', 'Interview Experience', 'How They Use Feedback', 'Preparation Approach', 'Under Pressure', 'Sessions Started', 'Sessions Completed', 'First Seen', 'Last Active'];
-        const rows = participantRows.map(r => [
-            r.participantId,
-            r.condition,
-            verbatim('experience', r.experience),
-            verbatim('feedbackLiteracy', r.feedbackLiteracy),
-            verbatim('regulatoryFocus', r.regulatoryFocus),
-            verbatim('anxietyLevel', r.anxietyLevel),
-            r.sessionsStarted,
-            r.sessionsCompleted,
-            new Date(r.firstSeen).toLocaleString(),
-            new Date(r.lastSeen).toLocaleString(),
-        ]);
+        const headers = [
+            'Participant ID', 'Condition',
+            'Timer Display', 'Timer Preference Answer', 'Dyslexia Font', 'Live Tools',
+            'CV Uploaded',
+            'Interview Experience', 'How They Use Feedback', 'How They Seek Feedback',
+            'Preparation Approach', 'Under Pressure',
+            'Sessions Started', 'Sessions Completed',
+            'Questions Answered', 'Total Probes Used', 'Avg Probes Per Question',
+            'First Seen', 'Last Active',
+        ];
+        const rows = participantRows.map(r => {
+            const avgProbes = r.questionsAnswered > 0
+                ? (r.totalProbes / r.questionsAnswered).toFixed(1)
+                : '—';
+            return [
+                r.participantId,
+                r.condition,
+                r.timerDisplay,
+                r.timerPreferenceAnswer,
+                r.dyslexiaFont,
+                r.liveTools,
+                r.cvUploaded,
+                verbatim('experience', r.experience),
+                verbatim('feedbackLiteracy', r.feedbackLiteracy),
+                verbatim('seeksFeedback', r.seeksFeedback),
+                verbatim('regulatoryFocus', r.regulatoryFocus),
+                verbatim('anxietyLevel', r.anxietyLevel),
+                r.sessionsStarted,
+                r.sessionsCompleted,
+                r.questionsAnswered,
+                r.totalProbes,
+                avgProbes,
+                new Date(r.firstSeen).toLocaleString(),
+                new Date(r.lastSeen).toLocaleString(),
+            ];
+        });
         const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
@@ -204,7 +270,41 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
         URL.revokeObjectURL(url);
     };
 
+    const copyToClipboard = (text: string, key: string) => {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopiedKey(key);
+            setTimeout(() => setCopiedKey(null), 2000);
+        });
+    };
+
+    const baseUrl = window.location.origin + window.location.pathname;
+
+    const CONDITIONS = [
+        {
+            key: 'scaffolded',
+            label: 'Condition A — Scaffolded',
+            color: 'indigo',
+            description: 'Full support: keyword pathfinder, coaching instructions, STAR progress indicators, difficulty badge.',
+            features: ['Keyword chips (live tracking)', 'Full coaching instructions per phase', 'STAR progress dots', 'Difficulty badge & question counter'],
+        },
+        {
+            key: 'standard',
+            label: 'Condition B — Standard',
+            color: 'blue',
+            description: 'Partial support: STAR progress indicators visible, but no keyword pathfinder and no coaching instructions.',
+            features: ['STAR progress dots', 'Difficulty badge & question counter', 'No keyword chips', 'No coaching instructions'],
+        },
+        {
+            key: 'minimal',
+            label: 'Condition C — Minimal',
+            color: 'slate',
+            description: 'No scaffolding: progress indicators hidden, no keywords, no coaching text. Candidate is on their own.',
+            features: ['No progress indicators', 'No keywords', 'No coaching instructions', 'Baseline performance signal'],
+        },
+    ] as const;
+
     const tabLabels: Record<DashboardTab, string> = {
+        links: 'Participant Links',
         participants: 'Participants',
         funnel: 'Funnel Stats',
         architecture: 'Vision Architecture',
@@ -242,7 +342,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                 </header>
 
                 <nav className="flex px-8 border-b border-slate-800 bg-slate-900/30 overflow-x-auto">
-                    {(['participants', 'funnel', 'architecture', 'adoption', 'engagement', 'costs', 'raw_data'] as DashboardTab[]).map(tab => (
+                    {(['links', 'participants', 'funnel', 'architecture', 'adoption', 'engagement', 'costs', 'raw_data'] as DashboardTab[]).map(tab => (
                         <button 
                             key={tab} 
                             onClick={() => setActiveTab(tab)}
@@ -255,19 +355,83 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
 
                 <main className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-900/50">
 
+                    {activeTab === 'links' && (
+                        <div className="animate-fade-in space-y-6">
+                            <div className="mb-6">
+                                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Participant Condition Links</h3>
+                                <p className="text-[11px] text-slate-500 leading-relaxed">Send each participant exactly one of these links. The URL parameter locks them into that condition for the session.</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {CONDITIONS.map(c => {
+                                    const url = `${baseUrl}?condition=${c.key}`;
+                                    const isCopied = copiedKey === c.key;
+                                    const colorMap: Record<string, string> = {
+                                        indigo: 'border-indigo-500/30 bg-indigo-500/5',
+                                        blue: 'border-blue-500/30 bg-blue-500/5',
+                                        slate: 'border-slate-600/50 bg-slate-800/30',
+                                    };
+                                    const btnColorMap: Record<string, string> = {
+                                        indigo: 'bg-indigo-600 hover:bg-indigo-500',
+                                        blue: 'bg-blue-600 hover:bg-blue-500',
+                                        slate: 'bg-slate-600 hover:bg-slate-500',
+                                    };
+                                    return (
+                                        <div key={c.key} className={`border rounded-3xl p-6 flex flex-col gap-4 ${colorMap[c.color]}`}>
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">{c.label}</p>
+                                                <p className="text-xs text-slate-300 font-medium leading-relaxed">{c.description}</p>
+                                            </div>
+                                            <ul className="space-y-1.5 flex-1">
+                                                {c.features.map(f => (
+                                                    <li key={f} className="flex items-center gap-2 text-[10px] text-slate-400">
+                                                        <div className="w-1 h-1 rounded-full bg-slate-600 shrink-0" />
+                                                        {f}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            <div className="pt-4 border-t border-slate-700 space-y-2">
+                                                <p className="text-[9px] font-mono text-slate-500 break-all">{url}</p>
+                                                <button
+                                                    onClick={() => copyToClipboard(url, c.key)}
+                                                    className={`w-full py-2.5 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${btnColorMap[c.color]}`}
+                                                >
+                                                    {isCopied ? <Check size={12} /> : <Copy size={12} />}
+                                                    {isCopied ? 'Copied!' : 'Copy Link'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="mt-6 p-5 bg-amber-500/5 border border-amber-500/20 rounded-2xl">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-1">Research Integrity Note</p>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">Assign conditions using block randomisation before sending links. Participants must not self-select their condition. Each participant should only ever receive one link.</p>
+                            </div>
+                        </div>
+                    )}
+
                     {activeTab === 'participants' && (
                         <div className="animate-fade-in flex flex-col h-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
-                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+                            <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center gap-3">
                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
                                     {participantRows.length} Participant{participantRows.length !== 1 ? 's' : ''} Recorded
                                 </span>
-                                <button
-                                    onClick={handleExportCSV}
-                                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                    Export CSV (Excel)
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleExportCSV}
+                                        className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        onClick={handleClearLog}
+                                        className="px-4 py-2 bg-rose-900 hover:bg-rose-800 text-rose-300 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        Clear All
+                                    </button>
+                                </div>
                             </div>
                             <div className="flex-1 overflow-auto custom-scrollbar">
                                 {participantRows.length === 0 ? (
@@ -280,22 +444,29 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                                             <tr>
                                                 <th className="p-3 border-b border-slate-700">Participant ID</th>
                                                 <th className="p-3 border-b border-slate-700">Condition</th>
+                                                <th className="p-3 border-b border-slate-700">Timer</th>
+                                                <th className="p-3 border-b border-slate-700">Live Tools</th>
                                                 <th className="p-3 border-b border-slate-700">Interview Experience</th>
                                                 <th className="p-3 border-b border-slate-700">How They Use Feedback</th>
+                                                <th className="p-3 border-b border-slate-700">How They Seek Feedback</th>
                                                 <th className="p-3 border-b border-slate-700">Preparation Approach</th>
                                                 <th className="p-3 border-b border-slate-700">Under Pressure</th>
                                                 <th className="p-3 border-b border-slate-700">Sessions</th>
                                                 <th className="p-3 border-b border-slate-700">Completed</th>
                                                 <th className="p-3 border-b border-slate-700">Last Active</th>
+                                                <th className="p-3 border-b border-slate-700"></th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-800/50">
                                             {participantRows.map((r, i) => (
-                                                <tr key={i} className="hover:bg-white/5 transition-colors">
+                                                <tr key={i} className="hover:bg-white/5 transition-colors group">
                                                     <td className="p-3 text-[10px] font-black text-indigo-400 font-mono">{r.participantId}</td>
                                                     <td className="p-3 text-[10px] text-slate-400">{r.condition}</td>
+                                                    <td className="p-3 text-[10px] text-slate-400">{r.timerDisplay}</td>
+                                                    <td className="p-3 text-[10px] text-slate-400">{r.liveTools}</td>
                                                     <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('experience', r.experience)}</td>
                                                     <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('feedbackLiteracy', r.feedbackLiteracy)}</td>
+                                                    <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('seeksFeedback', r.seeksFeedback)}</td>
                                                     <td className="p-3 text-[10px] text-slate-300 max-w-[160px]">{verbatim('regulatoryFocus', r.regulatoryFocus)}</td>
                                                     <td className="p-3 text-[10px] text-slate-300 max-w-[180px]">{verbatim('anxietyLevel', r.anxietyLevel)}</td>
                                                     <td className="p-3 text-[10px] text-slate-400 text-center">{r.sessionsStarted}</td>
@@ -303,6 +474,15 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose }) 
                                                         <span className={r.sessionsCompleted > 0 ? 'text-emerald-400 font-black' : 'text-slate-600'}>{r.sessionsCompleted}</span>
                                                     </td>
                                                     <td className="p-3 text-[10px] text-slate-500 font-mono">{new Date(r.lastSeen).toLocaleDateString()}</td>
+                                                    <td className="p-3">
+                                                        <button
+                                                            onClick={() => handleClearParticipant(r.participantId)}
+                                                            title="Remove this participant"
+                                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg bg-rose-900/50 hover:bg-rose-700 text-rose-400"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>

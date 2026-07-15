@@ -145,7 +145,8 @@ export type AnalyticsEventType =
   | 'session_complete' | 'feedback_generated' | 'intent_survey_submitted'
   | 'scaffold_toggled' | 'data_synced' | 'data_exported'
   | 'feedback_report_opened' | 'practice_task_noted'
-  | 'cv_uploaded' | 'questions_generated' | 'profile_submitted';
+  | 'cv_uploaded' | 'cv_upload_declined' | 'questions_generated' | 'profile_submitted'
+  | 'probe_used';
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
@@ -158,6 +159,7 @@ export interface AnalyticsEvent {
 export interface CandidateProfile {
   experience: 'novice' | 'some' | 'experienced' | 'expert';
   feedbackLiteracy: 'absorbs' | 'reflects' | 'overwhelmed' | 'uncertain';
+  seeksFeedback: 'proactive' | 'responsive' | 'avoidant' | 'uncertain';  // Carless & Young 2024
   regulatoryFocus: 'promotion' | 'prevention' | 'mixed' | 'unclear';
   anxietyLevel: 'low' | 'mild' | 'moderate' | 'high';
 }
@@ -214,10 +216,10 @@ export interface MeritVector {
 }
 
 export interface MeritVectors {
-  autonomy: MeritVector;
-  competence: MeritVector;
-  relatedness: MeritVector;
-  lowestVector: 'autonomy' | 'competence' | 'relatedness';
+  personalAgency: MeritVector;
+  skillSpecificity: MeritVector;
+  impactArticulation: MeritVector;
+  lowestVector: 'personalAgency' | 'skillSpecificity' | 'impactArticulation';
   primarySuggestionAnchor: string;
 }
 
@@ -237,13 +239,6 @@ export interface ProfessionalSelfVerificationSignals {
   researchNote: string;
 }
 
-export interface ImpressionManagementScore {
-  frontStageScore: number;
-  backStageScore: number;
-  dominantMode: 'front_stage' | 'back_stage' | 'balanced';
-  authenticitySignal: string;
-  feedbackImplication: string;
-}
 
 export interface AlgorithmicAversionSignal {
   aversionDetected: boolean;
@@ -267,10 +262,10 @@ export interface CHCDimension {
 }
 
 export interface CHCCognitiveDimensions {
-  crystallisedIntelligence: CHCDimension;  // Gc
-  fluidIntelligence: CHCDimension;          // Gf
-  practicalReasoning: CHCDimension;         // Gq
-  overallCHCNote: string;
+  abstractConceptualisation: CHCDimension;  // Kolb AC
+  activeExperimentation: CHCDimension;       // Kolb AE
+  concreteExperience: CHCDimension;          // Kolb CE
+  overallELCNote: string;
   researchNote: string;
 }
 
@@ -300,7 +295,6 @@ export interface ScaffoldedLearningSignal {
 export interface LayerBSignals {
   meritVectors: MeritVectors;
   professionalSelfVerificationSignals: ProfessionalSelfVerificationSignals;
-  impressionManagementScore: ImpressionManagementScore;
   algorithmicAversionSignal: AlgorithmicAversionSignal;
   socialIdentityAwareness: SocialIdentityAwareness;
   chcCognitiveDimensions: CHCCognitiveDimensions;
@@ -359,10 +353,10 @@ export interface DetailedFeedback {
 
   // Layer B - Researcher Signals
   meritVectors?: {
-    autonomy: { score: number; evidenceBasis: string };
-    competence: { score: number; evidenceBasis: string };
-    relatedness: { score: number; evidenceBasis: string };
-    lowestVector: 'autonomy' | 'competence' | 'relatedness';
+    personalAgency: { score: number; evidenceBasis: string };
+    skillSpecificity: { score: number; evidenceBasis: string };
+    impactArticulation: { score: number; evidenceBasis: string };
+    lowestVector: 'personalAgency' | 'skillSpecificity' | 'impactArticulation';
     primarySuggestionAnchor: string;
   };
   professionalSelfVerificationSignals?: {
@@ -373,13 +367,6 @@ export interface DetailedFeedback {
     fitSignal: string;
     feedbackImplication: string;
     researchNote: string;
-  };
-  impressionManagementScore?: {
-    frontStageScore: number;
-    backStageScore: number;
-    dominantMode: 'front_stage' | 'back_stage' | 'balanced';
-    authenticitySignal: string;
-    feedbackImplication: string;
   };
   algorithmicAversionSignal?: {
     aversionDetected: boolean;
@@ -394,10 +381,10 @@ export interface DetailedFeedback {
     scopeNote: string;
   };
   chcCognitiveDimensions?: {
-    crystallisedIntelligence: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
-    fluidIntelligence: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
-    practicalReasoning: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
-    overallCHCNote: string;
+    abstractConceptualisation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    activeExperimentation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    concreteExperience: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    overallELCNote: string;
     researchNote: string;
   };
   scaffoldedLearningSignal?: {
@@ -426,6 +413,45 @@ export interface DetailedFeedback {
   maskedTranscript: {
     text: string;
   };
+
+  // Layer B — Meso extensions (researcher only, absent for first-session candidates)
+  masteryTracker?: {
+    situation: { status: 'reached' | 'partial' | 'not_reached'; consolidated: boolean };
+    task:      { status: 'reached' | 'partial' | 'not_reached'; consolidated: boolean };
+    action:    { status: 'reached' | 'partial' | 'not_reached'; consolidated: boolean };
+    result:    { status: 'reached' | 'partial' | 'not_reached'; consolidated: boolean };
+    consolidatedComponents: string[];
+  };
+  calibrationAccuracy?: {
+    candidateSelfRating: string;
+    aiCompetencyRating: string;
+    calibrationGap: 'overestimate' | 'accurate' | 'underestimate';
+    calibrationDirection: string;
+    priorSessionGaps: string[];
+    consistentPattern: string;
+  };
+
+  // ── CANDIDATE-FACING IMPROVEMENT TARGETS ─────────────────────────
+  verbalImprovementPlan?: {
+    fillerPatterns: string;
+    pacingAssessment: string;
+    clarityTargets: string[];
+    practiceMethod: string;
+  } | null;
+
+  hiringProfileAlignment?: {
+    whatInterviewersLookFor: string[];
+    candidateAlignedStrengths: string[];
+    profileGaps: string[];
+    priorityFix: string;
+  } | null;
+
+  elcLearningCycle?: {
+    concreteExperienceBaseline: string;
+    reflectiveObservationInsight: string;
+    abstractPrinciple: string;
+    experimentationTarget: string;
+  } | null;
 }
 
 export interface Probe {
@@ -532,6 +558,15 @@ export interface QuestionSummaryReport {
   competencyDemonstrationDescriptor?: string;                  // Component 3b
   forwardOrientation?: string;             // Component 5: Career Adaptability + PsyCap Hope
   cvAlignmentNote?: string;               // CV cross-reference: what their background reveals about their answer
+  breakContextGap?: string | null;        // forward orientation from this question — seeded into next session break state
+
+  // Per-question Kolb ELC stage trace — shown to candidate immediately after each question
+  elcStages?: {
+    ce: string;   // Concrete Experience — what their answer showed about their current level
+    ro: string;   // Reflective Observation — what the probe revealed that the main answer did not
+    ac: string;   // Abstract Conceptualisation — the transferable principle this question produced
+    ae: string;   // Active Experimentation — the single action to test on the next question
+  } | null;
 }
 
 export interface QuestionDataAccumulator {
@@ -621,4 +656,56 @@ export interface JDCVAlignmentAnalysis {
     present: string[];
     missing: string[];
   };
+}
+
+// ── MESO ACCUMULATOR TYPES ─────────────────────────────────────────
+// Cross-session personality-adaptive architecture (Higgins 1997; Carless & Young 2024;
+// Boud & Molloy 2013; Hattie & Timperley 2007; Savickas 2012; Luthans 2007)
+
+export type RegFocusDelta =
+  | 'stable_promotion'
+  | 'stable_prevention'
+  | 'stable_mixed'
+  | 'prevention_to_promotion'
+  | 'promotion_to_prevention';
+
+export type FeedbackOrientationDelta = 'improving' | 'stable' | 'declining' | 'insufficient_data';
+export type CareerAdaptabilityStage  = 'concern' | 'control' | 'curiosity' | 'confidence';
+export type ScaffoldTrend            = 'reducing' | 'stable' | 'increasing' | 'insufficient_data';
+export type MasteryComponent         = 'situation' | 'task' | 'action' | 'result';
+
+export interface SessionRecord {
+  sessionId: string;
+  timestamp: number;
+  condition: ExperimentCondition;
+  competencyLevels: CompetencyDemonstrationLevel[];
+  scaffoldDependencyScore: number;          // 0–100
+  regulatoryFocus: 'promotion' | 'prevention' | 'mixed' | 'unclear';
+  feedbackOrientation: 'proactive' | 'responsive' | 'avoidant' | 'uncertain';
+  anxietyLevel: 'low' | 'mild' | 'moderate' | 'high';
+  selfReportedAnxietyLevel: string;         // free-text from pre-session question
+  forwardOrientationNotes: string[];        // Component 5 text from each question
+  starComponentsReached: MasteryComponent[];
+}
+
+export interface MesoDelta {
+  sessionCount: number;
+  competencySlope: number;                  // least-squares slope across sessions (positive = improving)
+  scaffoldTrend: ScaffoldTrend;
+  mesoScaffoldReduced: boolean;             // true when scaffoldDependencyScore slope < -0.1
+  regulatoryShift: RegFocusDelta;
+  feedbackOrientationDelta: FeedbackOrientationDelta;
+  dominantAnxietyLevel: 'low' | 'mild' | 'moderate' | 'high';
+  masteryConsolidated: MasteryComponent[];  // STAR components evidenced in ≥ 2 sessions
+  forwardOrientationActioned: boolean;      // did Session N evidence Session N-1's recommendation?
+  currentCareerAdaptabilityStage: CareerAdaptabilityStage;
+  priorFeedForwardAction: string | null;    // last forwardOrientation note from Session N-1
+  zpd_lowerBoundaryAdvanced: boolean;       // true if ZPD lower boundary is above Phase 1 baseline
+}
+
+export interface MesoAccumulator {
+  participantId: string;
+  sessions: SessionRecord[];
+  delta: MesoDelta | null;
+  lastUpdated: number;
 }

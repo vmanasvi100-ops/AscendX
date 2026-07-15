@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Probe, ProbeAnalysis, QuestionDataAccumulator, QuestionSummaryReport } from "../types";
+import { Probe, ProbeAnalysis, QuestionDataAccumulator, QuestionSummaryReport, MesoAccumulator } from "../types";
 
 const getAI = () => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
@@ -20,12 +20,40 @@ export interface GenerateProbeParams {
   candidateAnswer: string;
   conversationHistory: string;
   cumulativeTranscript?: string;
-  candidateProfile?: { experience: string; feedbackLiteracy: string; regulatoryFocus: string; anxietyLevel: string } | null;
+  candidateProfile?: { experience: string; feedbackLiteracy: string; seeksFeedback: string; regulatoryFocus: string; anxietyLevel: string } | null;
+  mesoAccumulator?: Pick<MesoAccumulator, 'delta'> | null;
 }
 
 export const generateProbe = async (params: GenerateProbeParams): Promise<Probe> => {
   const ai = getAI();
   const model = "gemini-3-flash-preview";
+
+  // 3A — ZPD phase offset: if cross-session scaffold reduced, advance phase thresholds by 1
+  const phaseOffset = params.mesoAccumulator?.delta?.mesoScaffoldReduced ? 1 : 0;
+  const p1End    = 2 - phaseOffset;
+  const p2Start  = 3 - phaseOffset;
+  const p2End    = 6 - phaseOffset;
+  const p3Start  = 7 - phaseOffset;
+
+  // 3B — Prior feed-forward: last session's forward orientation note
+  const priorFeedForwardAction = params.mesoAccumulator?.delta?.priorFeedForwardAction ?? null;
+
+  // 3B — Meso profile overrides (regulatory shift, feedback orientation, anxiety)
+  const mesoDelta = params.mesoAccumulator?.delta;
+  const mesoProfileBlock = mesoDelta
+    ? `CROSS-SESSION MESO PROFILE OVERRIDE (supersedes single-session profile for the fields below):
+      Regulatory shift trend: ${mesoDelta.regulatoryShift} | Feedback orientation trend: ${mesoDelta.feedbackOrientationDelta} | Dominant anxiety: ${mesoDelta.dominantAnxietyLevel}
+      ${mesoDelta.regulatoryShift === 'prevention_to_promotion' ? '→ BLENDED FRAMING: Use both "building on strengths" AND "closing gaps" language.' : ''}
+      ${mesoDelta.feedbackOrientationDelta === 'improving' ? '→ ORIENTATION IMPROVING: Encourage self-reflection before delivering rationale.' : mesoDelta.feedbackOrientationDelta === 'declining' ? '→ ORIENTATION DECLINING: Open rationale with reassurance before coaching point.' : ''}`
+    : '';
+
+  const priorFeedForwardBlock = priorFeedForwardAction
+    ? `PRIOR SESSION FEED-FORWARD (from Session N-1 forward orientation):
+      "${priorFeedForwardAction}"
+      → Q2 probe: reference this if the candidate's answer evidences they acted on it.
+      → calibrationNote: acknowledge whether this recommendation appears to have been practised.
+      → By Q4: flag in zpd_note if there is no evidence this was acted upon.`
+    : '';
 
   const response = await ai.models.generateContent({
     model,
@@ -86,7 +114,7 @@ Scaffolding principle: match support level to the candidate's current independen
 performance boundary (Zone of Proximal Development lower boundary).
 Gradually withdraw support as competence increases within the session.
 
-PHASE 1 — Introductory Alignment (session_phase_index 0–2, difficulty: EASY)
+PHASE 1 — Introductory Alignment (session_phase_index 0–${p1End}, difficulty: EASY)
   Lower boundary: candidate is at baseline — maximum scaffold provided.
   → Use supportive, structured language with no ambiguity
   → Offer structural hints if answer was incomplete:
@@ -95,7 +123,7 @@ PHASE 1 — Introductory Alignment (session_phase_index 0–2, difficulty: EASY)
   → NEVER increase cognitive pressure at this stage
   → Rationale MUST be detailed and warm
 
-PHASE 2 — Core Competency (session_phase_index 3–6, difficulty: MEDIUM)
+PHASE 2 — Core Competency (session_phase_index ${p2Start}–${p2End}, difficulty: MEDIUM)
   Lower boundary rising — moderate scaffold, building independence.
   → Reference candidate's language as always
   → Probe the gap between claim and evidence directly
@@ -103,7 +131,7 @@ PHASE 2 — Core Competency (session_phase_index 3–6, difficulty: MEDIUM)
   → Structural hints are reduced — candidate should be building structure independently
   → Rationale present but briefer
 
-PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
+PHASE 3 — Strategic High-Stakes (session_phase_index ${p3Start}+, difficulty: HARD)
   Lower boundary near upper — minimal scaffold, independent performance.
   → Ask for systemic thinking: 'How would you scale this approach organisation-wide?'
   → Challenge assumptions: 'What would a critic of that approach say?'
@@ -147,8 +175,10 @@ PHASE 3 — Strategic High-Stakes (session_phase_index 7+, difficulty: HARD)
 
 
       ADAPTIVE PROFILE MODIFIERS (apply to tone and rationale only — never change phase difficulty):
-      ${params.candidateProfile ? `Experience: ${params.candidateProfile.experience} | Feedback literacy: ${params.candidateProfile.feedbackLiteracy} | Regulatory focus: ${params.candidateProfile.regulatoryFocus} | Anxiety level: ${params.candidateProfile.anxietyLevel}
-      — novice/high-anxiety: warmer, longer rationale; overwhelmed/uncertain: simpler language; promotion: frame as building on strengths; prevention: frame as avoiding gaps.` : 'No profile provided — use defaults.'}
+      ${params.candidateProfile ? `Experience: ${params.candidateProfile.experience} | Feedback literacy: ${params.candidateProfile.feedbackLiteracy} | Seeks feedback: ${params.candidateProfile.seeksFeedback} | Regulatory focus: ${params.candidateProfile.regulatoryFocus} | Anxiety level: ${params.candidateProfile.anxietyLevel}
+      — novice/high-anxiety: warmer, longer rationale; overwhelmed/uncertain: simpler language; promotion: frame as building on strengths; prevention: frame as avoiding gaps; proactive: encourage self-reflection before rationale; avoidant: lead rationale with reassurance before coaching point.` : 'No profile provided — use defaults.'}
+      ${mesoProfileBlock}
+      ${priorFeedForwardBlock}
 
       CANDIDATE'S CURRENT ANSWER / CUMULATIVE TRANSCRIPT:
       ${params.cumulativeTranscript || params.candidateAnswer}
@@ -553,6 +583,17 @@ Write 2-3 sentences. Reference specific CV details by name where possible. Be di
 If their answer was well-aligned with their background, confirm that — it is useful feedback too.
 Output field: cvAlignmentNote` : ''}
 
+ELC STAGE LABELS (Kolb Experiential Learning Cycle — candidate-facing, plain English)
+Map this question's session to all four Kolb stages. One sentence each. No jargon.
+ce: What the candidate's main answer showed about their current level — their baseline for this question.
+ro: What the probe question revealed that the main answer did not. If no probe was used, describe
+    what the answer quality implies about their self-awareness.
+ac: The one transferable principle this question produced — what they now understand that applies
+    beyond this specific example and into any interview.
+ae: The single action to TEST on the VERY NEXT question or in a real interview.
+    Specific enough that they will know if they did it. Start with a verb.
+Output field: elcStages (object with ce, ro, ac, ae string fields)
+
 Return JSON only — no preamble, no markdown.`
           }]
         }
@@ -588,14 +629,24 @@ Return JSON only — no preamble, no markdown.`
             integratedCoaching: { type: Type.STRING },
             practiceTask: { type: Type.STRING },
             forwardOrientation: { type: Type.STRING },
-            cvAlignmentNote: { type: Type.STRING, nullable: true }
+            cvAlignmentNote: { type: Type.STRING, nullable: true },
+            elcStages: {
+              type: Type.OBJECT,
+              properties: {
+                ce: { type: Type.STRING },
+                ro: { type: Type.STRING },
+                ac: { type: Type.STRING },
+                ae: { type: Type.STRING }
+              },
+              required: ["ce", "ro", "ac", "ae"]
+            }
           },
           required: [
             "selfAssessmentPrompt", "calibrationNote",
             "competencyDemonstrationLevel", "competencyDemonstrationDescriptor",
             "answerOverview", "strengths", "developmentPoints",
             "probeEngagement", "probeCorrelation", "integratedCoaching",
-            "practiceTask", "forwardOrientation"
+            "practiceTask", "forwardOrientation", "elcStages"
           ]
         }
       }
@@ -613,6 +664,8 @@ Return JSON only — no preamble, no markdown.`
       competencyDemonstrationDescriptor: parsed.competencyDemonstrationDescriptor,
       forwardOrientation: parsed.forwardOrientation,
       cvAlignmentNote: parsed.cvAlignmentNote ?? null,
+      breakContextGap: parsed.forwardOrientation ?? null,
+      elcStages: parsed.elcStages ?? null,
     } as QuestionSummaryReport;
   } catch (err) {
     console.error("Failed to generate question summary:", err);

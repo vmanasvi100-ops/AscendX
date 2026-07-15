@@ -79,7 +79,7 @@ router.post('/', async (req: Request, res: Response) => {
 // CV and JD text are NOT returned here (minimisation). Only metadata and config labels.
 
 router.get('/:participantId', async (req: Request, res: Response) => {
-  const { participantId } = req.params;
+  const { participantId } = req.params as { participantId: string };
 
   try {
     const result = await query(
@@ -119,7 +119,7 @@ router.get('/:participantId', async (req: Request, res: Response) => {
 // Returns a single session with decrypted config — for resuming a session.
 
 router.get('/:participantId/:sessionId', async (req: Request, res: Response) => {
-  const { participantId, sessionId } = req.params;
+  const { participantId, sessionId } = req.params as { participantId: string; sessionId: string };
 
   try {
     const result = await query(
@@ -163,7 +163,7 @@ router.get('/:participantId/:sessionId', async (req: Request, res: Response) => 
 // Updates session progress incrementally — called after each question completes.
 
 router.patch('/:sessionId', async (req: Request, res: Response) => {
-  const { sessionId } = req.params;
+  const { sessionId } = req.params as { sessionId: string };
   const {
     participantId,
     currentQuestionIndex,
@@ -268,7 +268,7 @@ router.patch('/:sessionId', async (req: Request, res: Response) => {
 // Audit log entries remain (they are permanent by design).
 
 router.delete('/:participantId', async (req: Request, res: Response) => {
-  const { participantId } = req.params;
+  const { participantId } = req.params as { participantId: string };
 
   try {
     const result = await query<{ id: string }>(
@@ -301,7 +301,7 @@ router.delete('/:participantId', async (req: Request, res: Response) => {
 // Returns a full data export for a participant — GDPR Article 20 (data portability).
 
 router.get('/:participantId/export', async (req: Request, res: Response) => {
-  const { participantId } = req.params;
+  const { participantId } = req.params as { participantId: string };
 
   try {
     const [sessionsResult, consentResult] = await Promise.all([

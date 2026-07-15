@@ -25,7 +25,18 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
   onClose,
 }) => {
   const handlePrint = () => {
-    window.print();
+    // Temporarily remove overflow/max-height constraints so all content prints
+    const modal = document.querySelector('[data-report-modal]') as HTMLElement | null;
+    if (modal) {
+      const prev = { overflow: modal.style.overflow, maxHeight: modal.style.maxHeight };
+      modal.style.overflow = 'visible';
+      modal.style.maxHeight = 'none';
+      window.print();
+      modal.style.overflow = prev.overflow;
+      modal.style.maxHeight = prev.maxHeight;
+    } else {
+      window.print();
+    }
   };
 
   return (
@@ -35,7 +46,7 @@ const QuestionReport: React.FC<QuestionReportProps> = ({
       exit={{ opacity: 0, y: 20 }}
       className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-8 bg-slate-900/60 backdrop-blur-sm"
     >
-      <div className="bg-white w-full max-w-4xl max-h-full overflow-y-auto rounded-[40px] shadow-2xl flex flex-col custom-scrollbar">
+      <div data-report-modal className="bg-white w-full max-w-4xl max-h-full overflow-y-auto rounded-[40px] shadow-2xl flex flex-col custom-scrollbar">
 
         {/* Header Actions */}
         <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md px-8 py-4 border-b flex items-center justify-between">
