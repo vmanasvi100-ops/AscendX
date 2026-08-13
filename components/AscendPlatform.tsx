@@ -24,50 +24,241 @@ interface SessionEntry {
     transcriptSlice: string;
     probe: Probe | null;
     probeAnalysis: ProbeAnalysis | null;
+    act1Analysis?: ProbeAnalysis | null;  // ZPD lower boundary — unprobed (Vygotsky 1978)
     summaryReport: QuestionSummaryReport | null;
 }
 type VideoState = 'standard' | 'hidden';
 type AspectRatio = '9/16' | '2/3' | '3/4' | '4/5' | '3/2' | '16/10' | '16/5' | '16/7' | '20/7';
 
-function buildPlainLanguageSummary(feedback: DetailedFeedback): string {
-    // Priority order: behavioral evidence vectors → ELC signals → scaffold dependency
-    const mv = feedback.meritVectors;
-    if (mv) {
-        if (mv.lowestVector === 'personalAgency' && mv.personalAgency.score < 50)
-            return "your answers didn't clearly show your personal decisions";
-        if (mv.lowestVector === 'skillSpecificity' && mv.skillSpecificity.score < 50)
-            return "your answers needed more specific evidence of your skills";
-        if (mv.lowestVector === 'impactArticulation' && mv.impactArticulation.score < 50)
-            return "your answers rarely mentioned impact on others";
-    }
-    const chc = feedback.chcCognitiveDimensions;
-    if (chc) {
-        if (chc.activeExperimentation.score !== null && chc.activeExperimentation.score < 50)
-            return "your answers found it harder to adapt when questions shifted direction";
-        if (chc.abstractConceptualisation.score !== null && chc.abstractConceptualisation.score < 50)
-            return "your answers lacked specific domain knowledge for this role";
-        if (chc.concreteExperience.score !== null && chc.concreteExperience.score < 50)
-            return "your results lacked numbers or measurable outcomes";
-    }
-    const sc = feedback.scaffoldedLearningSignal;
-    if (sc) {
-        if (sc.scaffoldDependency.score > 65)
-            return "your answers improved most when follow-up questions were asked";
-        if (sc.phasingEffectiveness.trajectory === 'declining')
-            return "your answers were strongest early and lost structure later";
-    }
-    return feedback.weaknesses?.[0] ?? "keep building on your strengths from last session";
-}
 
-function saveSessionHistory(hint: string): void {
-    try {
-        const raw = localStorage.getItem('ascend_session_history');
-        const history: Array<{ date: string; hint: string }> = raw ? JSON.parse(raw) : [];
-        history.unshift({ date: new Date().toISOString(), hint });
-        localStorage.setItem('ascend_session_history', JSON.stringify(history.slice(0, 5)));
-    } catch { /* localStorage unavailable */ }
-}
 
+// Clear legacy session history key — superseded by email-keyed cross-session tracking
+try { localStorage.removeItem('ascend_session_history'); } catch { /* ignore */ }
+
+// ─── Preview Mode — realistic sample data for UI/audio testing without a full interview ────
+const _PREVIEW_TRANSCRIPT = "During my final year at university, I was leading a group project for our marketing module. We had three weeks to deliver a campaign strategy for a local charity. I noticed early on that our timeline wasn't realistic — we were already behind by the end of week one. So I restructured the schedule, assigned individual ownership to each section, and set up fifteen-minute check-ins every morning. I personally took on the risk assessment and timeline tracking so the rest of the team could focus on delivery. We presented on time and the charity implemented two of our three recommendations — the social media strategy and the community outreach plan.";
+
+const PREVIEW_SESSION_LOG: SessionEntry[] = [{
+    questionIndex: 0,
+    questionText: "Tell me about a time you demonstrated leadership under pressure.",
+    starPhaseReached: 3,
+    transcriptSlice: _PREVIEW_TRANSCRIPT,
+    probe: {
+        probe: "You mentioned restructuring the schedule — what was the specific decision you made, and what alternatives did you consider before choosing that approach?",
+        probe_type: 'DEEPENING',
+        rationale: "Candidate established strong context but has not articulated personal reasoning in the Action phase — key decision-making evidence is implicit.",
+        contextual_anchor: "I restructured the schedule",
+        scaffold_phase: 2,
+        difficulty: 'MEDIUM',
+        question_type: 'CORE_COMPETENCY',
+        zpd_note: "Upper boundary: candidate articulates deliberate decision-making with alternatives considered."
+    },
+    probeAnalysis: {
+        probe_successful: true,
+        depth_delta: 'increased',
+        evidence_added: "Candidate clarified the specific decision to pivot from shared ownership to individual accountability, and confirmed they considered extending the deadline before rejecting it.",
+        star_status: { situation: 'complete', task: 'complete', action: 'complete', result: 'complete' },
+        weakest_star_component: null,
+        contextual_anchor: "I personally took on the risk assessment",
+        suggested_next_probe_type: null,
+        behavioural_evidence_signals: { ownership_language: 'present', skill_language: 'present', impact_language: 'present' },
+        scaffold_dependency_signal: 'used_moderately',
+        interpretation: "Strong full-STAR response with clear personal ownership, measurable outcome, and deliberate decision-making evidence.",
+        pj_observations: ["Personal agency explicitly present: 'I personally took on'", "Measurable result with denominator: two of three", "Alternative-consideration signals senior decision-making pattern"],
+        novel_claim_introduced: true,
+        proceed: true,
+        reason: "Full STAR with personal ownership language and verifiable outcome. No further probing needed.",
+        merit_vectors: { autonomy: 78, competence: 72, relatedness: 58, lowest_vector: 'relatedness' },
+        presentation_authenticity: { front_stage: 38, back_stage: 71 },
+        chc_signals: { gc: 'moderate', gf: 'strong', gq: 'strong', lowest_signal: 'gc' },
+        algorithmic_aversion: { detected: false, evidence: null },
+        competency_demonstration_level: 'Established',
+        competency_demonstration_descriptor: "Full STAR with personal contribution, evidence of strategic decision-making, and a verifiable result. One precision step from Advanced."
+    },
+    act1Analysis: {
+        probe_successful: false,
+        depth_delta: 'same',
+        evidence_added: "",
+        star_status: { situation: 'complete', task: 'complete', action: 'partial', result: 'complete' },
+        weakest_star_component: 'action',
+        contextual_anchor: "",
+        suggested_next_probe_type: 'DEEPENING',
+        behavioural_evidence_signals: { ownership_language: 'absent', skill_language: 'present', impact_language: 'absent' },
+        scaffold_dependency_signal: 'relied_heavily',
+        interpretation: "Initial answer used predominantly group-level language in the Action phase, obscuring personal contribution.",
+        pj_observations: ["Action phase lacked personal agency language — 'we' used throughout"],
+        novel_claim_introduced: false,
+        proceed: false,
+        reason: "Action phase needs personal ownership language unlocked by probing.",
+        merit_vectors: { autonomy: 42, competence: 64, relatedness: 48, lowest_vector: 'autonomy' },
+        presentation_authenticity: { front_stage: 62, back_stage: 44 },
+        chc_signals: { gc: 'moderate', gf: 'moderate', gq: 'strong', lowest_signal: 'gc' },
+        algorithmic_aversion: { detected: false, evidence: null }
+    },
+    summaryReport: {
+        questionId: 'preview-q1',
+        questionText: "Tell me about a time you demonstrated leadership under pressure.",
+        answerOverview: "You described a group project where you identified a timeline risk early and restructured the team's approach before it became a delivery failure. Your answer demonstrated clear situational awareness and a proactive, structured response.",
+        strengths: [
+            "Personal ownership — explicit: 'I personally took on the risk assessment and timeline tracking' directly names your contribution and separates it from the team's work. This phrase alone distinguishes your answer from candidates who describe group outcomes without clarifying their individual role.",
+            "Measurable result — strong: two of three recommendations implemented is specific, verifiable, and includes a denominator — which gives the outcome claim immediate credibility rather than a vague claim of success."
+        ],
+        developmentPoints: [{
+            gap: "Team response to your leadership — not yet articulated",
+            whyItMatters: "You described what the team did after you restructured, but not how they responded to your leadership. Interviewers look for evidence of influence, not just execution.",
+            instruction: "Add one sentence: 'After I introduced the daily check-ins, the team told me it removed their uncertainty about priorities — they moved faster because they weren't second-guessing the plan.' Specific team response makes your leadership claim concrete rather than declared."
+        }],
+        probeEngagement: "You engaged well with the follow-up, introducing the detail about alternatives considered — you looked at extending the deadline before rejecting it. This reveals deliberate decision-making that was not visible in your initial answer.",
+        probeCorrelation: "Your initial answer established strong Situation and Task. The Action phase needed the probe to unlock personal ownership language. The development target: make that specificity available in your first delivery, without prompting.",
+        integratedCoaching: "You have the experience and the structure. The gap between your initial answer and your probed answer is precisely the gap between a good candidate and a strong one. The probe unlocked language you clearly had — the practice is to front-load it.",
+        practiceTask: "Record this answer again. Before the Action section, write down: 'The specific decision I made was...' Deliver that sentence first, then describe the execution. Repeat until you do not need the written prompt.",
+        timestamp: Date.now(),
+        selfAssessmentPrompt: "",
+        calibrationNote: "Your instinct to highlight the timeline restructure was exactly right — that is the highest-leverage action in your answer.",
+        competencyDemonstrationLevel: 'Established',
+        competencyDemonstrationDescriptor: "Full STAR response with personal contribution and measurable outcome. One adjustment — front-loading personal ownership language — would move this to Advanced.",
+        forwardOrientation: "Next session goal: open your Action section with a deliberate decision statement before describing execution. Practise until the ownership language comes first without prompting.",
+        cvAlignmentNote: "Your answer drew on documented group project experience and aligned directly with the leadership competency being assessed.",
+        elcStages: {
+            ce: "You arrived with a real experience — a genuine deadline, an external client, and team pressure that was authentic.",
+            ro: "The probe revealed that your decision-making was more deliberate than your initial answer suggested — you had considered alternatives and made an active choice.",
+            ac: "Transferable principle: your instinct to restructure accountability before execution is a leadership pattern, not a project management one — it applies in any ambiguous delivery context.",
+            ae: "Next session: open your Action section with 'I decided...' Deliver that sentence first. Measure whether the interviewer nods before you finish the next sentence."
+        }
+    }
+}];
+
+const PREVIEW_DETAILED_FEEDBACK: DetailedFeedback = {
+    performanceSummary: "Your session demonstrated clear structural instinct and genuine experience to draw on. You established context credibly, outlined the task clearly, and articulated a result with measurable specificity — two of three recommendations implemented is a strong outcome claim. The most significant development area is the Action phase: your initial delivery used group-level language that obscured your specific personal contribution. The follow-up probe unlocked substantially stronger material, which is a positive signal — the evidence exists, and the precision emerges when you are asked directly. The practice priority is to front-load that ownership language in your first delivery, before any prompt. Your answer improved meaningfully under probing, which indicates the gap is presentation-level, not experience-level — a faster fix than it appears.",
+    overallStarSynthesis: "Your STAR structure was present and largely complete. Situation and Task were established with genuine specificity. The Result was strong and verifiable. The Action phase showed clear improvement under probing — your initial delivery grouped your actions with the team's, but the follow-up surfaced a personal decision with an alternative considered and rejected. The NCS coaching priority is the Action phase: at 60% of interview weighting, it is where your answer is assessed most heavily, and it is the phase most improved by deliberate language choice rather than additional experience.",
+    strengths: [
+        "Personal ownership — explicit: 'I personally took on the risk assessment' directly names your contribution. Quote: 'I personally took on' | Signal: deliberate personal agency, not passive group membership | Reinforce: this language pattern is exactly what interviewers note when marking a candidate as leadership-capable.",
+        "Measurable result — strong: 'two of our three recommendations' is specific and verifiable with a denominator. Quote: 'two of our three recommendations' | Signal: outcome specificity with context — not a vague success claim | Reinforce: results with a ratio carry more credibility than results without one — you used this instinctively.",
+        "Strategic decision under pressure — present: you considered extending the deadline and rejected it in favour of restructuring. Quote: 'I considered extending the deadline but decided that would just push the problem forward' | Signal: alternatives-considered pattern, associated with senior-level decision-making | Reinforce: naming an alternative rejected is a precision move most candidates do not make."
+    ],
+    weaknesses: [
+        "Initial Action phase used group-level language | Observation: in your first delivery, the restructure was described as something 'we' did — your personal role was not separated until the probe asked directly. This is common among candidates with genuine collaborative experience, but it costs you in a solo-assessed interview. | Interview-standard version: 'I restructured the project schedule. I assigned individual ownership to each section and set up daily check-ins. The team then delivered against that structure.' — note: 'I restructured', not 'we restructured.' | Reinforce: the ownership language was available — it came out when asked — meaning this is a delivery habit, not a knowledge gap.",
+        "Team response to leadership not yet articulated | Observation: you described the team's output but not how they responded to your approach. Interviewers look for evidence of influence on others, not just task completion. | Interview-standard version: 'After I introduced the daily check-ins, one team member told me it removed their uncertainty — they moved faster because they weren't second-guessing the plan.' | Reinforce: this is a one-sentence addition. You do not need to restructure your answer."
+    ],
+    actionableSuggestions: [
+        "Moment: the transition from Situation to Action — the first 'I' statement after the situation has been established. | Insight: this is the highest-leverage sentence in the entire answer — interviewers are listening most carefully here. | Rewrite: 'I made the decision to restructure the entire project schedule. I moved us from shared ownership to individual accountability, with daily check-ins. That was my call, and I took personal responsibility for whether it worked.' | Reinforce: this rewrite does not change your story — it reframes the same facts in the language pattern that interview scoring criteria reward most heavily.",
+        "Moment: the Result statement — 'the charity implemented two of our three recommendations'. | Insight: this is already strong — the ratio gives it credibility. The one addition that would maximise it is a reflection on what the outcome told you. | Rewrite: 'The charity implemented two of our three recommendations. For me, that confirmed that the restructure wasn't just about managing the deadline — it was about protecting the quality of the work under pressure.' | Reinforce: the reflection sentence signals self-awareness, which interviewers associate with high-potential candidates."
+    ],
+    starAnalysis: {
+        situation: "Clearly established: final year university, group project, marketing module, three-week deadline, local charity client. Context is specific and credible.",
+        task: "Well-defined: deliver a full campaign strategy within a fixed deadline against expectations from a genuine external client. Stakes are real.",
+        action: "Partially strong in first delivery; complete after probing. Personal contributions named: restructuring the schedule, assigning individual ownership, daily check-ins, personal responsibility for risk assessment. Decision-making evidence (alternatives considered) surfaced under probing — the target for first-delivery improvement.",
+        result: "Strong and verifiable: two of three recommendations implemented. Ratio format adds credibility. Missing: one sentence on what the outcome demonstrated about your approach."
+    },
+    keywordCoverage: {
+        found: ["leadership", "deadline", "restructuring", "risk assessment", "team management", "accountability", "decision-making", "project delivery", "stakeholder", "outcome"],
+        missing: ["conflict resolution", "cross-functional collaboration", "budget management", "strategic planning", "stakeholder communication"]
+    },
+    careerDevelopment: {
+        certifications: [
+            "CMI Level 3 Award in Leadership and Management — directly relevant; formalises your leadership instinct with an industry-recognised credential",
+            "PRINCE2 Foundation — demonstrates structured project management thinking; complements the timeline restructure evidence in your answer"
+        ],
+        nextSteps: [
+            "Practise front-loading personal ownership language: record your answer, identify every 'we', convert each to 'I decided / I chose / I took responsibility for', replay and compare",
+            "Add team-response evidence to your leadership examples: for each key action, prepare one sentence about how a team member responded differently because of it",
+            "Prepare a second leadership example from a non-university context — interviewers often follow up with 'can you give me another example' to test breadth"
+        ]
+    },
+    rubrics: {
+        starCompletion: 4,
+        evidenceSpecificity: 4,
+        roleClarity: 3,
+        jdAlignment: 4,
+        confidence: 4,
+        justifications: {
+            starCompletion: "Full STAR present after probing. Situation, Task, and Result complete in first delivery. Action phase improved significantly under probing — averaged across applicable question only.",
+            evidenceSpecificity: "Strong specificity in Situation (three-week deadline, charity client), Action (restructured schedule, individual ownership, daily check-ins, personal risk assessment), and Result (two of three). Deducted one point: team-response evidence absent.",
+            roleClarity: "Personal contribution partially obscured in initial delivery by group-level language. Post-probe ownership language is strong. Deducted two points: clarity required prompting rather than being present from the start.",
+            jdAlignment: "Answer maps directly to leadership, project management, stakeholder delivery, and decision-making competencies required at graduate entry level.",
+            confidence: "Delivery was direct and structured. Hedging language minimal. Filler words low frequency. Sentence completion rate high. KNN/SVR proxy: 4/5."
+        }
+    },
+    maskedTranscript: { text: "During my [TIMEFRAME] at [INSTITUTION], I was leading a group project for our [MODULE]. We had [DURATION] to deliver a campaign strategy for a [CLIENT TYPE]. I noticed early on that our timeline wasn't realistic..." },
+    meritVectors: {
+        personalAgency: { score: 74, evidenceBasis: "Explicit 'I personally took on' language present post-probe; initial delivery used group language" },
+        skillSpecificity: { score: 71, evidenceBasis: "Named specific actions: schedule restructure, accountability assignment, daily check-ins, risk assessment" },
+        impactArticulation: { score: 52, evidenceBasis: "Result stated with ratio, but team-level impact of leadership not yet articulated" },
+        lowestVector: 'impactArticulation',
+        primarySuggestionAnchor: "Add one sentence describing how the team responded to your restructure — this closes the impact articulation gap and completes the leadership narrative"
+    },
+    professionalSelfVerificationSignals: {
+        voice: { score: 62, orientation: 'balanced', evidenceBasis: "Balanced between prepared narrative and genuine reflection" },
+        motivation: { score: 68, orientation: 'self_verifying', evidenceBasis: "Motivational language suggests genuine satisfaction rather than performed enthusiasm" },
+        explanation: { score: 58, orientation: 'balanced', evidenceBasis: "Explanation of decision-making includes genuinely specific detail" },
+        dominantMode: 'mixed',
+        fitSignal: "Candidate presents as genuinely motivated by impact-oriented work, consistent with a role where output quality is tied to external stakeholder outcomes.",
+        feedbackImplication: "Feedback should lead with evidence from their answer, not general principles — this candidate responds well to specific anchoring.",
+        researchNote: "Cable & Kay (2012) — mixed mode suggests candidate is engaging authentically with prepared material."
+    },
+    algorithmicAversionSignal: { aversionDetected: false, aversionEvidence: null, feedbackImplication: "No aversion signal detected. Candidate engaged directly with structured follow-up questions without resistance." },
+    socialIdentityAwareness: { activated: false, valueExpressionScore: 62, socialRecognitionScore: 55, dominantMotivation: 'value_expression', scopeNote: "Mild value-expression motivation — emphasis on genuine charity impact suggests values-aligned framing." },
+    chcCognitiveDimensions: {
+        abstractConceptualisation: { score: 58, evidenceBasis: "Candidate named the decision principle when prompted — present but not spontaneously deployed", validityDisclaimer: "Inferential only — not a validated psychometric measure" },
+        activeExperimentation: { score: 74, evidenceBasis: "Strong adaptation under probing — introduced new material and considered alternatives when asked", validityDisclaimer: "Inferential only — not a validated psychometric measure" },
+        concreteExperience: { score: 71, evidenceBasis: "Outcome stated with verifiable specificity (two of three). Timeline detail shows concrete grounding", validityDisclaimer: "Inferential only — not a validated psychometric measure" },
+        overallELCNote: "Candidate's Kolb profile: strongest in Active Experimentation (AE). Abstract Conceptualisation (AC) is the growth area — they have the principle but do not yet name it spontaneously.",
+        researchNote: "Kolb (1984) — ELC signal derived from within-session trajectory, not validated as a psychometric profile."
+    },
+    scaffoldedLearningSignal: {
+        zpdProgressionObservation: "Unprobed response showed partial Action phase — correct content, group-level framing. One probe moved candidate to explicit personal ownership language, indicating ZPD upper boundary is accessible and close.",
+        scaffoldDependency: { score: 42, interpretation: 'independent', researchNote: "Wood et al. (1976) — score below 50 indicates candidate can perform near upper boundary with minimal scaffolding." },
+        zoneOfProximalDevelopmentEstimate: {
+            lowerBoundary: "Can deliver full STAR with outcome specificity when context is familiar and the question is direct",
+            upperBoundary: "Can articulate personal decision-making with alternatives considered and front-load ownership language in first delivery without prompting",
+            developmentGap: "The gap is delivery automaticity — candidate has the content but requires a prompt to access ownership framing",
+            practiceRecommendation: "Deliberate practice on the ownership phrase trigger: record the answer, identify every 'we' in the Action phase, convert each to 'I decided / I chose', replay until the 'I' framing comes first spontaneously"
+        },
+        phasingEffectiveness: { phase1Score: 62, phase2Score: 81, phase3Score: null, trajectory: 'improving' }
+    },
+    psychologicalSafetyScore: {
+        score: 88,
+        checklist: { taskLevelOnly: true, noDemotivatorsUsed: true, rationalePresent: true, atLeastFiveSuggestions: true, strengthsFirst: true, warmTone: true }
+    },
+    biasAndFairnessNote: "No demographic or identity-related bias signals detected. Feedback anchored exclusively to task-level evidence — specific transcript phrases and observable structural choices.",
+    transcriptAnnotations: [
+        {
+            moment: "When describing the timeline problem, you said: 'I noticed early on that our timeline wasn't realistic'",
+            observation: "This phrase establishes proactive identification — not reactive management. 'Early' is doing significant work here. The development area: 'realistic' is a vague qualifier that does not tell the interviewer what specifically was wrong with the plan.",
+            standardVersion: "I identified early that our original schedule assumed consistent daily output across all sections, which wasn't achievable given two team members' part-time commitments. I flagged this in the first week rather than waiting for a delivery failure.",
+            principle: "Specificity in problem identification signals diagnostic competence — interviewers distinguish between candidates who notice problems and candidates who can name exactly what the problem is."
+        },
+        {
+            moment: "When describing your action, you said: 'I restructured the schedule, assigned clearer ownership to each section'",
+            observation: "Strong personal ownership language — 'I restructured' not 'we restructured.' This is exactly the framing interviewers reward. The limitation: 'clearer ownership' is still abstract — what did individual ownership mean operationally?",
+            standardVersion: "I restructured the schedule by converting from shared responsibility to individual ownership: each team member owned one deliverable with a named deadline, and I held the cross-section dependency map. If one section slipped, I caught it before it cascaded.",
+            principle: "Describing the mechanism of your action (not just the action itself) demonstrates leadership competence at the process level, not just the decision level."
+        },
+        {
+            moment: "When stating the result, you said: 'the charity actually implemented two of our three recommendations'",
+            observation: "This is your strongest sentence. 'Actually' signals genuine surprise and authentic pride — it reads as unscripted. The ratio (two of three) gives the result immediate credibility. The development: no reflection on what this told you about your approach.",
+            standardVersion: "The charity implemented two of our three recommendations — the social media strategy and the community outreach plan. For me, that confirmed that the restructure wasn't just about managing the deadline — it was about protecting the quality of the work under pressure.",
+            principle: "A result statement followed by a one-sentence reflection demonstrates self-awareness — the quality most associated with high-potential candidates in graduate-level interviews."
+        }
+    ],
+    cvMissedOpportunities: [
+        {
+            cvItem: "Student Ambassador Programme — managed events for 200+ attendees across two academic years",
+            questionContext: "When asked about the impact of your leadership on others, you described the team's output but did not mention your track record of managing stakeholder-facing events. This was directly relevant.",
+            whyItFits: "The leadership question probed for evidence of leading under stakeholder scrutiny. Your Ambassador role involves exactly this — managing expectations, coordinating logistics, and delivering in front of an external audience. It would have reinforced your leadership claim with a second example without requiring a separate answer.",
+            exampleUsage: "You already have this — here is how to deploy it: 'This wasn't my first time leading in a stakeholder-facing context — as a Student Ambassador I coordinated events for over two hundred people, which built exactly the pressure-management instinct I used in the charity project.'"
+        }
+    ],
+    intentionAssessment: "Your pre-session goal was to practise articulating personal contribution more clearly in behavioural questions. Your session showed improvement in this area under probing — the ownership language emerged when asked. The next milestone: deploy it in the first delivery without a prompt.",
+    elcLearningCycle: {
+        concreteExperienceBaseline: "You arrived with a real and relevant experience — a genuine deadline, an external client, and team pressure that was authentic. The content of your experience is strong.",
+        reflectiveObservationInsight: "The session revealed that your personal decision-making is more deliberate than your first answer suggested — you had considered alternatives and made an active choice. That reasoning was not visible until probing unlocked it.",
+        abstractPrinciple: "The transferable principle: your instinct to restructure accountability before execution is a leadership pattern, not a project management one — it applies in any context where ambiguity is creating delivery risk.",
+        experimentationTarget: "Between now and your next session: deliver this answer to someone you know and ask them to name the specific decision you made. If they cannot name it after one hearing, your Action phrase is not yet clear enough."
+    },
+    amoPerformanceContext: "No significant AMO barriers detected. Your answer demonstrated both ability and motivation. The opportunity gap was partially addressed by the probe — your next session should target making that clarity self-generated.",
+    feedbackApproachLevel: 'Established'
+};
 
 const Waveform: React.FC<{ active: boolean; scale?: number }> = ({ active, scale = 1 }) => (
     <div className="flex items-end justify-center gap-1.5 h-16" style={{ transform: `scale(${scale})` }}>
@@ -110,16 +301,17 @@ const TimerWidget: React.FC<{
 interface AscendPlatformProps {
     logEvent: (type: AnalyticsEventType, metadata?: Record<string, any>) => void;
     onExit: () => void;
+    email?: string;
 }
 
-const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => {
+const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email = '' }) => {
     const {
         videoEnabled,
         setVideoEnabled,
         dyslexiaFont,
         timerDisplay,
         liveTools,
-        activeQuestions,
+        activeQuestions: rawActiveQuestions,
         cvText,
         companyName,
         targetRole,
@@ -181,6 +373,12 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [reassuringMessage, setReassuringMessage] = useState("");
     const [probeHistory, setProbeHistory] = useState<string[]>([]);
 
+    // Learning Intention — pre-session goal set by student (criterion-referenced assessment)
+    const [learningIntention, setLearningIntention] = useState<string>('');
+    // Self-Assessment — per-question drafts and submitted responses (Boud & Molloy 2013)
+    const [selfAssessmentDrafts, setSelfAssessmentDrafts] = useState<Record<number, string>>({});
+    const [selfAssessmentResponses, setSelfAssessmentResponses] = useState<Record<number, string>>({});
+
     // Session Log Accumulator
     const [sessionLog, setSessionLog] = useState<SessionEntry[]>([]);
     const [reportModalEntry, setReportModalEntry] = useState<SessionEntry | null>(null);
@@ -193,6 +391,62 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
     const [lastQuestionCompleted, setLastQuestionCompleted] = useState(false);
     const [waitingForMoreQuestions, setWaitingForMoreQuestions] = useState(false);
     const researcherMode = React.useMemo(() => new URLSearchParams(window.location.search).get('researcher') === 'true', []);
+    const demoMode = React.useMemo(() => new URLSearchParams(window.location.search).get('demo') === 'true', []);
+    const previewMode = React.useMemo(() => new URLSearchParams(window.location.search).get('preview') === 'true', []);
+
+    // Mic test state — for audio verification without a full interview
+    const [micTestState, setMicTestState] = useState<'idle' | 'recording' | 'done' | 'error'>('idle');
+    const [micTestResult, setMicTestResult] = useState<string>('');
+    const [reportFormat, setReportFormat] = useState<'narrative' | 'visual' | 'digest' | 'focus'>('narrative');
+    const [focusSection, setFocusSection] = useState<'star' | 'feedback' | 'coaching' | 'insights' | 'cv' | 'practice'>('star');
+    const [primingDone, setPrimingDone] = useState(() =>
+        new URLSearchParams(window.location.search).get('preview') === 'true'
+    );
+    const [primingFocus, setPrimingFocus] = useState<string | null>(null);
+    const [primingCustom, setPrimingCustom] = useState('');
+    const [selfRatingDone, setSelfRatingDone] = useState(() =>
+        new URLSearchParams(window.location.search).get('preview') === 'true'
+    );
+    const [selfRating, setSelfRating] = useState<Record<string, 'strong' | 'partial' | 'struggled' | null>>({
+        situation: null, task: null, action: null, result: null,
+    });
+    const [reflectionDone, setReflectionDone] = useState(() =>
+        new URLSearchParams(window.location.search).get('preview') === 'true'
+    );
+    const [reflectionText, setReflectionText] = useState('');
+    const [practiceDate, setPracticeDate] = useState('');
+
+    // ── Cross-session history (keyed by email) ────────────────────────────
+    type SessionSnapshot = {
+        date: string;
+        starScores: [number|null, number|null, number|null, number|null];
+        priority: string;
+        strength: string;
+        weakness: string;
+    };
+    const sessionKey = email.trim().toLowerCase()
+        ? `ascend_sessions_${email.trim().toLowerCase()}`
+        : null;
+    const [sessionHistory, setSessionHistory] = useState<SessionSnapshot[]>(() => {
+        if (!sessionKey) return [];
+        try { return JSON.parse(localStorage.getItem(sessionKey) ?? '[]'); }
+        catch { return []; }
+    });
+    const prevSession = sessionHistory[sessionHistory.length - 1] ?? null;
+
+
+    // Demo mode: one question per type for fast testing
+    const activeQuestions = React.useMemo(() => {
+        if (!demoMode) return rawActiveQuestions;
+        const seen = new Set<string>();
+        return rawActiveQuestions.filter(q => {
+            const type = q.questionType ?? 'behavioural';
+            if (seen.has(type)) return false;
+            seen.add(type);
+            return true;
+        });
+    }, [rawActiveQuestions, demoMode]);
+
     const waitingAtLength = useRef(0);
     const reflectiveBreakShown = useRef(false); // ensure break only shows once per session
 
@@ -222,11 +476,100 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         phaseStartTimestamp.current = Date.now();
     }, []);
 
+    // Save session snapshot to localStorage once report is ready
+    useEffect(() => {
+        if (recordingStatus !== 'uploaded' || !detailedFeedback || !sessionKey) return;
+        const snapshot: SessionSnapshot = {
+            date: new Date().toLocaleDateString(),
+            starScores: candidateStarCompletion,
+            priority: detailedFeedback.hiringProfileAlignment?.priorityFix
+                ?? detailedFeedback.meritVectors?.primarySuggestionAnchor
+                ?? detailedFeedback.actionableSuggestions?.[0]
+                ?? '',
+            strength: (detailedFeedback.strengths?.[0] ?? '').split('|')[0].trim(),
+            weakness: (detailedFeedback.weaknesses?.[0] ?? '').split('|')[0].trim(),
+        };
+        setSessionHistory(prev => {
+            const updated = [...prev, snapshot];
+            try { localStorage.setItem(sessionKey, JSON.stringify(updated)); } catch {}
+            return updated;
+        });
+    }, [recordingStatus, detailedFeedback, sessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
     useEffect(() => {
         if (recordingStatus === 'uploaded' && detailedFeedback) {
             logEvent('feedback_report_opened', { hasLayerB: !!detailedFeedback.meritVectors });
         }
     }, [recordingStatus, detailedFeedback]);
+
+    // Preview mode: pre-populate with sample data so the full report/feedback UI is visible without completing an interview
+    useEffect(() => {
+        if (!previewMode) return;
+        setSessionLog(PREVIEW_SESSION_LOG);
+        setDetailedFeedback(PREVIEW_DETAILED_FEEDBACK);
+        setRecordingStatus('uploaded');
+        setActiveTab('report');
+    }, [previewMode]);
+
+    // Candidate's actual STAR completion % per component — averaged across all session questions
+    const candidateStarCompletion = React.useMemo(() => {
+        const comps = ['situation', 'task', 'action', 'result'] as const;
+        const buckets: Record<string, number[]> = { situation: [], task: [], action: [], result: [] };
+        sessionLog.forEach(e => {
+            const st = e.probeAnalysis?.star_status;
+            if (!st) return;
+            comps.forEach(c => {
+                if (st[c] === 'complete') buckets[c].push(100);
+                else if (st[c] === 'partial') buckets[c].push(50);
+                else if (st[c] === 'missing') buckets[c].push(0);
+                // 'not_yet_required' excluded
+            });
+        });
+        return comps.map(c => {
+            const arr = buckets[c];
+            return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+        }) as [number | null, number | null, number | null, number | null];
+    }, [sessionLog]);
+
+    const handleMicTest = React.useCallback(async () => {
+        setMicTestState('recording');
+        setMicTestResult('');
+        try {
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(micStream);
+            const chunks: Blob[] = [];
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = async () => {
+                micStream.getTracks().forEach(t => t.stop());
+                try {
+                    const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+                    const buffer = await blob.arrayBuffer();
+                    const bytes = new Uint8Array(buffer);
+                    let binary = '';
+                    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                    const base64 = btoa(binary);
+                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+                    const r = await ai.models.generateContent({
+                        model: 'gemini-2.0-flash',
+                        contents: [{ parts: [
+                            { text: 'Transcribe this audio recording exactly as spoken. If the audio is silent or inaudible, say so clearly.' },
+                            { inlineData: { mimeType: blob.type || 'audio/webm', data: base64 } }
+                        ]}]
+                    });
+                    setMicTestResult(r.text || '(no transcription returned)');
+                    setMicTestState('done');
+                } catch (err) {
+                    setMicTestResult(`Transcription failed: ${err instanceof Error ? err.message : String(err)}`);
+                    setMicTestState('error');
+                }
+            };
+            recorder.start();
+            setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 5000);
+        } catch (err) {
+            setMicTestResult(`Microphone access failed: ${err instanceof Error ? err.message : String(err)}`);
+            setMicTestState('error');
+        }
+    }, []);
 
     // When new questions arrive while waiting mid-session, auto-advance to the next question
     useEffect(() => {
@@ -591,25 +934,39 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
         const generateAndLog = async (isFinal = false) => {
             setIsGeneratingProbe(true);
             let summaryReport: QuestionSummaryReport | null = null;
+            let act1Analysis: any = null;
             if (transcript.trim().length >= 20) {
                 try {
-                    summaryReport = await generateQuestionSummary({
-                        accumulator: {
-                            questionId: currentQuestion.text,
-                            transcript: transcript,
-                            phaseAnalyses: [],
-                            probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
-                            timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
-                            responseDurations: {
-                                actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
-                                probes: [],
+                    // Run Act 1 lower-boundary analysis in parallel with question summary
+                    // act1Analysis = ZPD lower boundary (Vygotsky 1978): what candidate can do independently
+                    // probeAnalysis = ZPD upper boundary: what candidate can do with structured support
+                    const [act1Result, generatedSummary] = await Promise.all([
+                        analyzeProbeResponse({
+                            targetRole, companyName,
+                            question: currentQuestion.text,
+                            response: transcript,
+                            scaffoldPhase: 1,
+                        }).then(a => ({ ...a, zpd_boundary_type: 'act_one' as const })).catch(() => null),
+                        generateQuestionSummary({
+                            accumulator: {
+                                questionId: currentQuestion.text,
+                                transcript: transcript,
+                                phaseAnalyses: [],
+                                probeAnalyses: probeAnalysis ? [{ ...probeAnalysis, zpd_boundary_type: 'probed' as const }] : [],
+                                timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
+                                responseDurations: {
+                                    actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
+                                    probes: [],
+                                },
                             },
-                        },
-                        targetRole,
-                        companyName,
-                        cvSummary: cvText || undefined,
-                        jobDescription: jobDescription || undefined,
-                    });
+                            targetRole,
+                            companyName,
+                            cvSummary: cvText || undefined,
+                            jobDescription: jobDescription || undefined,
+                        }),
+                    ]);
+                    act1Analysis = act1Result;
+                    summaryReport = generatedSummary;
                 } catch (err) {
                     console.error('Failed to generate question summary:', err);
                 }
@@ -622,6 +979,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                 transcriptSlice: transcript,
                 probe: currentProbe,
                 probeAnalysis: probeAnalysis,
+                act1Analysis: act1Analysis,   // ZPD lower boundary — unprobed performance (Vygotsky 1978)
                 summaryReport: summaryReport,
             }]);
 
@@ -758,7 +1116,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit }) => 
                                     questionId: currentQuestion.text,
                                     transcript: transcript,
                                     phaseAnalyses: [],
-                                    probeAnalyses: probeAnalysis ? [probeAnalysis] : [],
+                                    probeAnalyses: probeAnalysis ? [{ ...probeAnalysis, zpd_boundary_type: 'probed' as const }] : [],
                                     timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
                                     responseDurations: {
                                         actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
@@ -862,13 +1220,13 @@ if (recordingStatus === 'recording') await handleRecord();
                     evidenceSpecificity: 0,
                     roleClarity: 0,
                     jdAlignment: 0,
-                    communicationClarity: 0,
+                    confidence: 0,
                     justifications: {
                         starCompletion: "No data available",
                         evidenceSpecificity: "No data available",
                         roleClarity: "No data available",
                         jdAlignment: "No data available",
-                        communicationClarity: "No data available"
+                        confidence: "No data available"
                     }
                 },
                 strengths: [],
@@ -886,6 +1244,22 @@ if (recordingStatus === 'recording') await handleRecord();
 
         setIsGeneratingFeedback(true);
         try {
+            // ── Compute session CDL profile for level-differentiated feedback ──
+            const cdlCounts = { Emerging: 0, Developing: 0, Established: 0, Advanced: 0 };
+            sessionLog.forEach(e => {
+                const lvl = e.summaryReport?.competencyDemonstrationLevel;
+                if (lvl && lvl in cdlCounts) cdlCounts[lvl as keyof typeof cdlCounts]++;
+            });
+            const totalWithCDL = Object.values(cdlCounts).reduce((a, b) => a + b, 0);
+            const modalCDLEntry = totalWithCDL > 0
+                ? Object.entries(cdlCounts).sort((a, b) => b[1] - a[1])[0]
+                : null;
+            const sessionCDLProfile = totalWithCDL > 0 && modalCDLEntry ? {
+                modalLevel: modalCDLEntry[0] as 'Emerging' | 'Developing' | 'Established' | 'Advanced',
+                levelCounts: cdlCounts,
+                totalQuestions: sessionLog.length,
+            } : null;
+
             const feedback = await generateDetailedFeedback({
                 transcript,
                 jobRequirements: activeQuestions.map(q => q.text).join("\n"),
@@ -897,9 +1271,10 @@ if (recordingStatus === 'recording') await handleRecord();
                 phaseProgression: `${currentQuestionIndex + 1} of ${activeQuestions.length} questions completed`,
                 candidateProfile: effectiveCandidateProfile,
                 mesoAccumulator,
+                sessionCDLProfile,
+                learningIntention: learningIntention.trim() || null,
             });
             setDetailedFeedback(feedback);
-            saveSessionHistory(buildPlainLanguageSummary(feedback));
             // ── Wire cross-session ELC tracking: build SessionRecord from this session ──
             const scoreToLevel = (s: number): CompetencyDemonstrationLevel =>
               s >= 5 ? 'Advanced' : s >= 4 ? 'Established' : s >= 3 ? 'Developing' : 'Emerging';
@@ -1022,7 +1397,7 @@ ${detailedFeedback.overallStarSynthesis || 'N/A'}
 - Evidence Specificity: ${rd?.evidenceSpecificity ?? 0}/5 — ${rd?.justifications?.evidenceSpecificity || ''}
 - Role Clarity:         ${rd?.roleClarity ?? 0}/5 — ${rd?.justifications?.roleClarity || ''}
 - JD Alignment:         ${rd?.jdAlignment ?? 0}/5 — ${rd?.justifications?.jdAlignment || ''}
-- Communication:        ${rd?.communicationClarity ?? 0}/5 — ${rd?.justifications?.communicationClarity || ''}
+- Communication:        ${rd?.confidence ?? 0}/5 — ${rd?.justifications?.confidence || ''}
 
 ## 4. KEY STRENGTHS
 ${detailedFeedback.strengths.map(s => `+ ${s}`).join('\n')}
@@ -1145,6 +1520,146 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
     }
 
     if (recordingStatus === 'uploaded') {
+        // ── Reflection gate — RO stage before analysis ────────────────────
+        if (!reflectionDone) {
+            const starters = [
+                'What surprised me most was…',
+                'The moment I felt least confident was…',
+                'If I could redo one part, it would be…',
+            ];
+            return (
+                <div className="min-h-screen w-screen bg-slate-900 flex flex-col items-center justify-center p-8 animate-fade-in">
+                    <div className="max-w-lg w-full">
+                        {/* Welcome back card */}
+                        {prevSession && (
+                            <div className="mb-8 p-5 bg-white/5 border border-white/10 rounded-2xl">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-2">Welcome back</p>
+                                <p className="text-sm font-bold text-white mb-3">Last session · {prevSession.date}</p>
+                                <div className="flex gap-2 mb-3">
+                                    {(['S','T','A','R'] as const).map((l, i) => {
+                                        const s = prevSession.starScores[i];
+                                        const star = s === null ? '—' : s >= 80 ? '5★' : s >= 50 ? '3★' : '1★';
+                                        const col = s === null ? 'text-slate-500' : s >= 80 ? 'text-emerald-400' : s >= 50 ? 'text-amber-400' : 'text-rose-400';
+                                        return (
+                                            <div key={l} className="flex-1 bg-white/5 rounded-xl py-2 text-center">
+                                                <p className="text-[9px] font-black text-slate-400">{l}</p>
+                                                <p className={`text-[11px] font-black ${col}`}>{star}</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                {prevSession.weakness && (
+                                    <p className="text-[10px] text-slate-400 font-medium leading-snug">
+                                        Last time you were working on: <span className="text-white font-bold">{prevSession.weakness}</span>. Watch for it today.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-3">Take a breath</p>
+                        <h2 className="text-3xl font-black text-white leading-tight mb-3">What did you notice?</h2>
+                        <p className="text-sm text-slate-400 font-medium mb-8 leading-relaxed">
+                            Before the analysis loads — sit with the experience for a moment. There's no right answer. This is just for you.
+                        </p>
+
+                        <div className="space-y-2 mb-5">
+                            {starters.map(s => (
+                                <button
+                                    key={s}
+                                    onClick={() => setReflectionText(prev => prev ? prev : s)}
+                                    className="w-full text-left px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-slate-200 text-xs font-medium transition-all"
+                                >
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+
+                        <textarea
+                            value={reflectionText}
+                            onChange={e => setReflectionText(e.target.value)}
+                            placeholder="Write anything — or pick a starter above…"
+                            rows={4}
+                            className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-slate-600 text-sm font-medium focus:outline-none focus:border-indigo-500 resize-none mb-8 leading-relaxed"
+                        />
+
+                        <button
+                            onClick={() => setReflectionDone(true)}
+                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-indigo-900/40"
+                        >
+                            {reflectionText.trim() ? 'Continue →' : 'Skip for now →'}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Self-rating gate — before the report is revealed ──────────────
+        if (!selfRatingDone) {
+            const comps = [
+                { key: 'situation', label: 'Situation', hint: 'Did you set the scene clearly — what was happening and why it mattered?' },
+                { key: 'task',      label: 'Task',      hint: 'Did you make your specific role and responsibility clear?' },
+                { key: 'action',    label: 'Action',    hint: 'Did you explain what YOU did, step by step, in your own words?' },
+                { key: 'result',    label: 'Result',    hint: 'Did you land a concrete, measurable outcome?' },
+            ] as const;
+            const allRated = comps.every(c => selfRating[c.key] !== null);
+            return (
+                <div className="min-h-screen w-screen bg-slate-50 flex flex-col items-center justify-center p-8 animate-fade-in">
+                    <div className="max-w-xl w-full">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-2">Before we show you the analysis</p>
+                        <h2 className="text-2xl font-black text-slate-900 leading-tight mb-2">How do you think you did?</h2>
+                        <p className="text-sm text-slate-400 font-medium mb-10">Rate each STAR component honestly — then compare your read with the AI's. No wrong answers here.</p>
+
+                        <div className="space-y-4 mb-10">
+                            {comps.map(comp => (
+                                <div key={comp.key} className="bg-white border border-slate-200 rounded-2xl p-5">
+                                    <div className="flex items-start justify-between gap-4 mb-3">
+                                        <div>
+                                            <p className="text-sm font-black text-slate-800">{comp.label}</p>
+                                            <p className="text-[10px] text-slate-400 font-medium mt-0.5 leading-snug">{comp.hint}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {(['strong', 'partial', 'struggled'] as const).map(opt => {
+                                            const cfg = {
+                                                strong:    { label: 'Strong',    cls: 'border-emerald-400 bg-emerald-50 text-emerald-700' },
+                                                partial:   { label: 'Partial',   cls: 'border-amber-400 bg-amber-50 text-amber-700' },
+                                                struggled: { label: 'Struggled', cls: 'border-rose-400 bg-rose-50 text-rose-700' },
+                                            }[opt];
+                                            const active = selfRating[comp.key] === opt;
+                                            return (
+                                                <button
+                                                    key={opt}
+                                                    onClick={() => setSelfRating(prev => ({ ...prev, [comp.key]: opt }))}
+                                                    className={`flex-1 py-2 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                                                        active ? cfg.cls : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                                                    }`}
+                                                >
+                                                    {cfg.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={() => setSelfRatingDone(true)}
+                            disabled={!allRated}
+                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-black text-sm uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-indigo-900/20"
+                        >
+                            {allRated ? 'See My Results →' : 'Rate all four to continue'}
+                        </button>
+                        <button
+                            onClick={() => setSelfRatingDone(true)}
+                            className="w-full mt-3 py-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
+                        >
+                            Skip
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
         return (
             <div className="min-h-screen w-screen bg-slate-50 flex flex-col items-center p-8 overflow-y-auto custom-scrollbar animate-fade-in relative">
                 <div className="max-w-7xl w-full space-y-12">
@@ -1186,8 +1701,63 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                 Print Report
                             </button>
+                            {/* Mic test — visible always but labelled "Test Audio" for quick audio verification */}
+                            <button
+                                onClick={handleMicTest}
+                                disabled={micTestState === 'recording'}
+                                className={`px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] flex items-center gap-3 transition-all active:scale-95 border ${
+                                    micTestState === 'recording'
+                                        ? 'bg-rose-50 border-rose-200 text-rose-600 animate-pulse cursor-not-allowed'
+                                        : micTestState === 'done'
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                        : micTestState === 'error'
+                                        ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
+                                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                }`}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                                {micTestState === 'recording' ? 'Recording 5s…' : micTestState === 'done' ? 'Audio ✓ Test Again' : micTestState === 'error' ? 'Mic Error — Retry' : 'Test Audio'}
+                            </button>
                         </div>
                     </div>
+
+                    {/* Preview mode banner */}
+                    {previewMode && (
+                        <div className="mt-6 p-5 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-start gap-4">
+                            <div className="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                                <Sparkles size={16} className="text-white" />
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mb-1">Preview Mode — Sample Data</p>
+                                <p className="text-xs font-medium text-indigo-800">This report is populated with realistic dummy data so you can explore every panel — feedback, insights, STAR analysis, transcript annotations, and CV missed opportunities — without completing a full interview. Use the <strong>Test Audio</strong> button above to verify your microphone and transcription are working.</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Mic test result panel */}
+                    {(micTestState === 'done' || micTestState === 'error') && micTestResult && (
+                        <div className={`mt-4 p-5 rounded-2xl border flex items-start gap-4 ${micTestState === 'error' ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${micTestState === 'error' ? 'bg-rose-500' : 'bg-emerald-500'}`}>
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                                    {micTestState === 'error'
+                                        ? <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        : <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />}
+                                </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${micTestState === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                    {micTestState === 'error' ? 'Audio Test Failed' : 'Audio Transcription Result'}
+                                </p>
+                                <p className={`text-sm font-medium leading-relaxed ${micTestState === 'error' ? 'text-rose-800' : 'text-emerald-900'}`}>{micTestResult}</p>
+                                {micTestState === 'done' && <p className="text-[10px] text-emerald-600 font-bold mt-2 uppercase tracking-widest">Microphone and transcription are working correctly.</p>}
+                            </div>
+                            <button onClick={() => { setMicTestState('idle'); setMicTestResult(''); }} className="text-slate-400 hover:text-slate-600 transition-colors shrink-0">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    )}
 
                     {detailedFeedback?.noData && (
                         <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-amber-700 max-w-2xl">
@@ -1208,6 +1778,135 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                         </div>
                     ) : detailedFeedback ? (
                         <>
+
+
+                        {/* ── Format selector — preview mode only ─────────────────── */}
+                        {previewMode && (
+                            <div className="mb-8 p-5 bg-white border border-slate-200 rounded-3xl flex items-center gap-3 flex-wrap shadow-sm">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Report Format</span>
+                                <div className="flex gap-2 flex-wrap">
+                                    {([
+                                        { id: 'narrative' as const, label: 'Narrative', hint: 'Full prose detail' },
+                                        { id: 'visual' as const, label: 'Visual', hint: 'Charts & cards' },
+                                        { id: 'digest' as const, label: 'Digest', hint: 'Bullet points only' },
+                                        { id: 'focus' as const, label: 'Focus', hint: 'One section at a time' },
+                                    ]).map(fmt => (
+                                        <button key={fmt.id} onClick={() => setReportFormat(fmt.id)} title={fmt.hint}
+                                            className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+                                                reportFormat === fmt.id
+                                                    ? 'bg-slate-900 text-white border-slate-900 shadow-md'
+                                                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-400 hover:text-slate-700'
+                                            }`}>{fmt.label}</button>
+                                    ))}
+                                </div>
+                                {reportFormat === 'focus' && (
+                                    <select value={focusSection} onChange={e => setFocusSection(e.target.value as typeof focusSection)}
+                                        className="ml-1 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200 bg-white text-slate-700 cursor-pointer focus:outline-none focus:border-indigo-400">
+                                        <option value="star">STAR Analysis</option>
+                                        <option value="feedback">Strengths & Weaknesses</option>
+                                        <option value="coaching">Coaching & Suggestions</option>
+                                        <option value="insights">Research Insights</option>
+                                        <option value="cv">CV Alignment</option>
+                                        <option value="practice">Practice Tasks</option>
+                                    </select>
+                                )}
+                                <span className="text-[9px] text-slate-400 ml-auto hidden md:block">
+                                    {reportFormat === 'narrative' ? 'Full prose — every section, all detail' :
+                                     reportFormat === 'visual' ? 'Charts, bars, and cards — same data, visual first' :
+                                     reportFormat === 'digest' ? 'Bullet points only — scannable at-a-glance' :
+                                     'One section expanded — choose what to focus on'}
+                                </span>
+                            </div>
+                        )}
+                        {/* ── NARRATIVE (default + all real sessions) ─────────────── */}
+                        {(!previewMode || reportFormat === 'narrative') && <>
+                        {/* ── Confidence anchor — lead with what worked ── */}
+                        {(() => {
+                            const strengths = detailedFeedback.strengths ?? [];
+                            if (!strengths.length) return null;
+                            return (
+                                <div className="mb-6 p-7 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-[32px]">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-4">Before anything else — what you did well</p>
+                                    <div className="space-y-4">
+                                        {strengths.map((raw: string, i: number) => {
+                                            const [headline, detail] = raw.split('|').map((s: string) => s.trim());
+                                            return (
+                                                <div key={i} className="flex gap-3">
+                                                    <span className="mt-1 w-4 h-4 shrink-0 flex items-center justify-center rounded-full bg-emerald-500 text-white text-[8px] font-black">{i + 1}</span>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-800 leading-snug">{headline}</p>
+                                                        {detail && <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">{detail}</p>}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-[9px] font-medium text-emerald-500 mt-3">These are real. Hold onto them as you read the rest.</p>
+                                    {/* Cross-session delta */}
+                                    {prevSession && (() => {
+                                        const labels = ['S','T','A','R'];
+                                        const toStar = (s: number|null) => s === null ? '—' : s >= 80 ? '5★' : s >= 50 ? '3★' : '1★';
+                                        const col = (s: number|null) => s === null ? 'text-slate-400' : s >= 80 ? 'text-emerald-600' : s >= 50 ? 'text-amber-500' : 'text-rose-500';
+                                        return (
+                                            <div className="mt-4 pt-4 border-t border-emerald-200">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-3">Your progress since last session · {prevSession.date}</p>
+                                                <div className="grid grid-cols-4 gap-2">
+                                                    {labels.map((l, i) => {
+                                                        const prev = prevSession.starScores[i];
+                                                        const curr = candidateStarCompletion[i];
+                                                        const prevStar = toStar(prev);
+                                                        const currStar = toStar(curr);
+                                                        const improved = curr !== null && prev !== null && curr > prev;
+                                                        return (
+                                                            <div key={l} className="bg-white border border-slate-100 rounded-xl p-3 text-center">
+                                                                <p className="text-[9px] font-black text-slate-400 mb-1">{l}</p>
+                                                                <p className={`text-[10px] font-bold text-slate-400`}>{prevStar}</p>
+                                                                <p className="text-[9px] text-slate-300 my-0.5">↓</p>
+                                                                <p className={`text-[11px] font-black ${col(curr)} ${improved ? 'underline underline-offset-2' : ''}`}>{currStar}</p>
+                                                                {improved && <p className="text-[8px] font-black text-emerald-500 mt-0.5">↑</p>}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                    {/* Self-rating comparison */}
+                                    {Object.values(selfRating).some(v => v !== null) && (() => {
+                                        const comps = ['situation', 'task', 'action', 'result'] as const;
+                                        const labels = { situation: 'S', task: 'T', action: 'A', result: 'R' };
+                                        const colours = {
+                                            strong:    'bg-emerald-100 text-emerald-700',
+                                            partial:   'bg-amber-100 text-amber-700',
+                                            struggled: 'bg-rose-100 text-rose-700',
+                                        };
+                                        return (
+                                            <div className="mt-4 pt-4 border-t border-emerald-200">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-2">Your self-read</p>
+                                                <div className="flex gap-2">
+                                                    {comps.map(c => {
+                                                        const r = selfRating[c];
+                                                        return (
+                                                            <div key={c} className={`flex-1 rounded-xl py-2 text-center ${r ? colours[r] : 'bg-slate-100 text-slate-400'}`}>
+                                                                <p className="text-[10px] font-black">{labels[c]}</p>
+                                                                <p className="text-[8px] font-bold capitalize">{r ?? '—'}</p>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-[9px] text-emerald-500 mt-2">Compare this with the STAR chart below.</p>
+                                                {reflectionText.trim() && (
+                                                    <div className="mt-3 pt-3 border-t border-emerald-200">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-1">Your reflection</p>
+                                                        <p className="text-xs text-slate-500 font-medium italic leading-relaxed">"{reflectionText.trim()}"</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            );
+                        })()}
                         {/* Priority Action — one thing to walk away with */}
                         {(() => {
                             const priority = detailedFeedback.hiringProfileAlignment?.priorityFix
@@ -1215,41 +1914,134 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 ?? detailedFeedback.actionableSuggestions?.[0]
                                 ?? null;
                             return priority ? (
-                                <div className="mb-8 p-6 bg-slate-900 rounded-[32px] border border-indigo-500/30">
+                                <div id="report-priority-action" className="mb-8 p-6 bg-slate-900 rounded-[32px] border border-indigo-500/30">
                                     <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-2">Your One Priority</p>
                                     <p className="text-base font-bold text-white leading-relaxed">{priority}</p>
                                     <p className="text-[9px] font-medium text-slate-500 mt-3">Everything below supports this. Start here.</p>
                                 </div>
                             ) : null;
                         })()}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                            {/* Left Column: Summary & Rubrics */}
-                            <div className="md:col-span-2 space-y-8">
+                        <div className="space-y-8">
+                            {/* ── Report sections — single column flow ── */}
+                            <div className="space-y-8">
                                 {/* Performance Summary */}
                                 <section id="report-performance-summary" className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                     <div className="flex items-center gap-3 mb-6">
                                         <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
                                             <TrendingUp size={20} />
                                         </div>
-                                        <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Performance Summary</h3>
+                                        <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Profile Summary</h3>
                                     </div>
-                                    <p className="text-slate-700 leading-relaxed font-medium">{detailedFeedback.performanceSummary}</p>
+
+                                    {/* Key takeaways — performanceSummary split into scannable bullets */}
+                                    {detailedFeedback.performanceSummary && (() => {
+                                        const bullets = detailedFeedback.performanceSummary
+                                            .split(/(?<=\.)\s+/)
+                                            .map((s: string) => s.trim())
+                                            .filter((s: string) => s.length > 10);
+                                        return (
+                                            <ul className="space-y-2 mb-6">
+                                                {bullets.map((b: string, i: number) => (
+                                                    <li key={i} className="flex gap-3 items-start">
+                                                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
+                                                        <p className="text-sm font-medium text-slate-700 leading-relaxed">{b}</p>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        );
+                                    })()}
+
+                                    {/* Strengths + Development areas — two columns */}
+                                    {((detailedFeedback.strengths?.length ?? 0) > 0 || (detailedFeedback.weaknesses?.length ?? 0) > 0) && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                            {/* Strengths */}
+                                            {(detailedFeedback.strengths?.length ?? 0) > 0 && (
+                                                <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-3">Strengths</p>
+                                                    <ul className="space-y-2">
+                                                        {detailedFeedback.strengths.map((raw: string, i: number) => {
+                                                            const headline = raw.split('|')[0].trim();
+                                                            return (
+                                                                <li key={i} className="flex gap-2 items-start">
+                                                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                                                    <p className="text-xs font-medium text-slate-700 leading-relaxed">{headline}</p>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {/* Development areas */}
+                                            {(detailedFeedback.weaknesses?.length ?? 0) > 0 && (
+                                                <div className="p-5 bg-amber-50 border border-amber-200 rounded-2xl">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-3">Development Areas</p>
+                                                    <ul className="space-y-2">
+                                                        {detailedFeedback.weaknesses.map((raw: string, i: number) => {
+                                                            const headline = raw.split('|')[0].trim();
+                                                            return (
+                                                                <li key={i} className="flex gap-2 items-start">
+                                                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                                                                    <p className="text-xs font-medium text-slate-700 leading-relaxed">{headline}</p>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {detailedFeedback.overallStarSynthesis && (
-                                        <div className="mt-6 p-5 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                        <div className="mt-5 p-5 bg-indigo-50 rounded-2xl border border-indigo-100">
                                             <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-2">STAR Session Synthesis</p>
                                             <p className="text-sm font-medium text-slate-700 leading-relaxed">{detailedFeedback.overallStarSynthesis}</p>
                                         </div>
                                     )}
 
-                                    {/* Rubrics — 5 scores as progress bars */}
-                                    <div id="report-rubrics-grid" className="mt-8 space-y-4">
+                                    {/* Sentence-Level Translation — what you said → interview-standard language */}
+                                    {detailedFeedback.transcriptAnnotations && detailedFeedback.transcriptAnnotations.length > 0 && (
+                                        <div className="mt-6 space-y-4">
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-800">Your Words → Interview Standard</p>
+                                                <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">Each moment below shows exactly what you said, what it reveals, and how the same idea sounds in polished interview language — ready to use verbatim.</p>
+                                            </div>
+                                            {detailedFeedback.transcriptAnnotations.map((annotation, i) => (
+                                                <div key={i} className="rounded-2xl border border-slate-200 overflow-hidden">
+                                                    {/* Moment header */}
+                                                    <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="text-[8px] font-black text-indigo-400 bg-indigo-50 rounded-full w-5 h-5 flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                                                            <p className="text-[10px] font-semibold text-slate-600 leading-relaxed italic">{annotation.moment}</p>
+                                                        </div>
+                                                    </div>
+                                                    {/* Observation */}
+                                                    <div className="px-5 py-3 border-b border-slate-100">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">What this reveals</p>
+                                                        <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{annotation.observation}</p>
+                                                    </div>
+                                                    {/* Standard version — the coaching gift */}
+                                                    <div className="px-5 py-3 bg-gradient-to-br from-indigo-50 to-indigo-50/30 border-b border-indigo-100">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">Interview-standard version</p>
+                                                        <p className="text-[11px] font-semibold text-indigo-900 leading-relaxed">{annotation.standardVersion}</p>
+                                                    </div>
+                                                    {/* Principle */}
+                                                    <div className="px-5 py-2.5 bg-slate-900/2">
+                                                        <p className="text-[9px] text-slate-400 leading-relaxed italic">{annotation.principle}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Rubrics — researcher only (numerical scores not shown to candidates per FRAMEWORK.md ethical note) */}
+                                    {researcherMode && <div id="report-rubrics-grid" className="mt-8 space-y-4">
                                         <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Professional Rubrics (1–5 Scale)</p>
                                         {(detailedFeedback?.rubrics ? [
                                             { key: 'starCompletion', label: 'STAR Completion' },
                                             { key: 'evidenceSpecificity', label: 'Evidence Specificity' },
                                             { key: 'roleClarity', label: 'Role Clarity' },
                                             { key: 'jdAlignment', label: 'JD Alignment' },
-                                            { key: 'communicationClarity', label: 'Communication Clarity' },
+                                            { key: 'confidence', label: 'Communication Clarity' },
                                         ] as const : []).map(({ key, label }) => {
                                             const score = detailedFeedback.rubrics?.[key] ?? 0;
                                             const justification = detailedFeedback.rubrics?.justifications?.[key];
@@ -1271,20 +2063,123 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 </div>
                                             );
                                         })}
-                                    </div>
+                                    </div>}
                                 </section>
 
+                                {/* CV Missed Opportunities — prominent gap alert */}
+                                {detailedFeedback.cvMissedOpportunities && detailedFeedback.cvMissedOpportunities.length > 0 && (
+                                    <section className="bg-amber-50 p-8 rounded-[40px] border-2 border-amber-200 shadow-sm">
+                                        <div className="flex items-start gap-4 mb-6">
+                                            <div className="p-2 bg-amber-200 rounded-xl shrink-0">
+                                                <Target size={20} className="text-amber-800" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-sm font-black uppercase tracking-widest text-amber-900">CV Evidence You Already Have — But Didn't Use</h3>
+                                                <p className="text-[11px] text-amber-700 mt-1 leading-relaxed font-medium">
+                                                    Your CV documents real, relevant experience that interviewers would expect to hear. The entries below show exactly where that evidence would have been strongest — and how to deploy it next time.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-5">
+                                            {detailedFeedback.cvMissedOpportunities.map((opp, i) => (
+                                                <div key={i} className="bg-white rounded-2xl border border-amber-100 overflow-hidden">
+                                                    {/* CV Item */}
+                                                    <div className="px-5 py-3 bg-amber-100/60 border-b border-amber-100">
+                                                        <p className="text-[8px] font-black uppercase tracking-widest text-amber-600 mb-1">What You Have on Your CV</p>
+                                                        <p className="text-[11px] font-bold text-amber-900 leading-relaxed">{opp.cvItem}</p>
+                                                    </div>
+                                                    {/* Where it applied */}
+                                                    <div className="px-5 py-3 border-b border-slate-100">
+                                                        <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-1">Where It Was Relevant</p>
+                                                        <p className="text-[11px] font-medium text-slate-600 leading-relaxed">{opp.questionContext}</p>
+                                                    </div>
+                                                    {/* Why it fits */}
+                                                    <div className="px-5 py-3 border-b border-slate-100">
+                                                        <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-1">Why This Would Have Strengthened Your Answer</p>
+                                                        <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{opp.whyItFits}</p>
+                                                    </div>
+                                                    {/* Ready-to-use version */}
+                                                    <div className="px-5 py-3 bg-indigo-50 border-b border-indigo-100">
+                                                        <p className="text-[8px] font-black uppercase tracking-widest text-indigo-500 mb-1">How to Use It Next Time</p>
+                                                        <p className="text-[11px] font-semibold text-indigo-900 leading-relaxed">{opp.exampleUsage}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+                                )}
+
                                 <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
-                                    <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-6 flex items-center gap-2">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-4 flex items-center gap-2">
                                         <Award size={16} /> STAR Analysis
                                     </h3>
+                                    {/* STAR Phase Weight Bar — NCS standard vs candidate actual */}
+                                    <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
+                                        {/* NCS standard */}
+                                        <div>
+                                            <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-2">NCS Standard Weight</p>
+                                            <div className="flex gap-0.5 items-end h-8 mb-0.5">
+                                                {[{l:'S',w:15,c:'bg-teal-400'},{l:'T',w:15,c:'bg-amber-400'},{l:'A',w:60,c:'bg-rose-500'},{l:'R',w:10,c:'bg-orange-400'}].map(({l,w,c}) => (
+                                                    <div key={l} className="flex flex-col items-center justify-end" style={{flex: w}}>
+                                                        <div className={`w-full ${c} rounded-t opacity-40`} style={{height: `${Math.max(4, w * 0.4)}px`}} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-0.5">
+                                                {[{l:'S',w:15},{l:'T',w:15},{l:'A',w:60},{l:'R',w:10}].map(({l,w}) => (
+                                                    <div key={l} className="text-center" style={{flex: w}}>
+                                                        <span className="text-[8px] font-black text-slate-300">{l}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        {/* Candidate actual */}
+                                        {candidateStarCompletion.some(v => v !== null) && (
+                                            <div>
+                                                <p className="text-[8px] font-black uppercase tracking-widest text-indigo-500 mb-2">Your Completion</p>
+                                                <div className="flex gap-0.5 items-end h-8 mb-0.5">
+                                                    {([{l:'S',c:'bg-teal-500'},{l:'T',c:'bg-amber-500'},{l:'A',c:'bg-indigo-600'},{l:'R',c:'bg-orange-500'}] as const).map(({l,c}, i) => {
+                                                        const score = candidateStarCompletion[i];
+                                                        const barH = score !== null ? Math.max(4, score * 0.32) : 4;
+                                                        const barColor = score === null ? 'bg-slate-200' : score >= 80 ? c : score >= 50 ? 'bg-amber-400' : 'bg-rose-400';
+                                                        return (
+                                                            <div key={l} className="flex flex-col items-center justify-end" style={{flex: [15,15,60,10][i]}}>
+                                                                <div className={`w-full ${barColor} rounded-t`} style={{height: `${barH}px`}} />
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <div className="flex gap-0.5">
+                                                    {[{l:'S',w:15},{l:'T',w:15},{l:'A',w:60},{l:'R',w:10}].map(({l,w},i) => (
+                                                        <div key={l} className="text-center" style={{flex: w}}>
+                                                            <span className={`text-[8px] font-black ${i === 2 ? 'text-indigo-500' : 'text-slate-400'}`}>{l}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <p className="text-[8px] text-slate-400 mt-2">Green = 80 %+ · Amber = 50–79 % · Red = below 50 %. Action (60 % weight) is the coaching priority.</p>
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {(detailedFeedback.starAnalysis && typeof detailedFeedback.starAnalysis === 'object') ? Object.entries(detailedFeedback.starAnalysis).map(([key, value]) => (
-                                            <div key={key} className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-2">{key}</h4>
+                                        {(detailedFeedback.starAnalysis && typeof detailedFeedback.starAnalysis === 'object') ? (['situation','task','action','result'] as const).map((key, i) => {
+                                            const value = detailedFeedback.starAnalysis[key];
+                                            const score = candidateStarCompletion[i];
+                                            const ncsW = [15,15,60,10][i];
+                                            const scoreColor = score === null ? 'bg-slate-200 text-slate-500' : score >= 80 ? 'bg-emerald-100 text-emerald-700' : score >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600';
+                                            return (
+                                            <div key={key} className={`p-5 rounded-2xl border ${key === 'action' ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h4 className={`text-[10px] font-black uppercase tracking-widest ${key === 'action' ? 'text-rose-500' : 'text-indigo-400'}`}>{key}</h4>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {score !== null && (
+                                                            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full ${scoreColor}`}>You: {score >= 80 ? '5★' : score >= 50 ? '3★' : '1★'}</span>
+                                                        )}
+                                                        <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-slate-200 text-slate-400">NCS: {ncsW}%{key === 'action' ? ' ★' : ''}</span>
+                                                    </div>
+                                                </div>
                                                 <p className="text-xs font-medium text-slate-700 leading-relaxed">{value}</p>
                                             </div>
-                                        )) : null}
+                                        )}) : null}
                                     </div>
                                 </section>
 
@@ -1758,7 +2653,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 </section>
                             </div>
 
-                            {/* Right Column: Career & Bias */}
+                            {/* ── Continuation ── */}
                             <div className="space-y-8">
                                 {detailedFeedback.integrityViolation?.detected && (
                                     <section className={`p-8 rounded-[40px] border shadow-sm animate-pulse ${detailedFeedback.integrityViolation.type === 'abusive_language' || detailedFeedback.integrityViolation.type === 'sensitive_information'
@@ -1852,7 +2747,758 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 </div>
                             </div>
                         </div>
+
+                        {/* ── Per-Question Coaching Breakdown ──────────────────────── */}
+                        {sessionLog.length > 0 && (
+                            <div className="space-y-6">
+                                <div className="flex items-center gap-4 pt-4">
+                                    <div className="flex-1 h-px bg-slate-200" />
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl"><FileText size={18} /></div>
+                                        <h2 className="text-sm font-black uppercase tracking-widest text-slate-900">Per-Question Coaching</h2>
+                                    </div>
+                                    <div className="flex-1 h-px bg-slate-200" />
+                                </div>
+                                {sessionLog.map((entry, idx) => (
+                                    <div key={idx} className="bg-white border border-slate-200 rounded-[40px] shadow-sm overflow-hidden">
+                                        {/* Question header */}
+                                        <div className="px-8 py-6 border-b border-slate-100 flex items-start justify-between gap-4">
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Q{entry.questionIndex + 1} · {CATEGORIES[entry.questionIndex] || 'General'}</span>
+                                                <p className="text-base font-bold text-slate-900 mt-1 leading-snug">"{entry.questionText}"</p>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                                <div className="flex gap-1.5">
+                                                    {(['S','T','A','R'] as const).map((s, i) => (
+                                                        <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black ${i <= entry.starPhaseReached ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>{s}</div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-1.5">
+                                                    {(['situation','task','action','result'] as const).map((comp, i) => {
+                                                        const st = entry.probeAnalysis?.star_status?.[comp];
+                                                        const score = st === 'complete' ? 100 : st === 'partial' ? 50 : st === 'missing' ? 0 : null;
+                                                        const label = score !== null ? (score >= 80 ? '5★' : score >= 50 ? '3★' : '1★') : ['15%','15%','60%','10%'][i];
+                                                        const color = score === null ? (i === 2 ? 'text-indigo-300' : 'text-slate-200') : score >= 80 ? 'text-emerald-500' : score >= 50 ? 'text-amber-500' : 'text-rose-400';
+                                                        return <div key={i} title={score !== null ? `${comp}: ${score >= 80 ? '5★' : score >= 50 ? '3★' : '1★'} · NCS weight ${['15','15','60','10'][i]}%` : `NCS weight ${['15','15','60','10'][i]}%`} className={`w-7 text-center text-[8px] font-bold ${color}`}>{label}</div>;
+                                                    })}
+                                                </div>
+                                                {entry.summaryReport?.competencyDemonstrationLevel && (() => {
+                                                    const lvl = entry.summaryReport!.competencyDemonstrationLevel!;
+                                                    const colors: Record<string, string> = { Emerging: 'bg-rose-100 text-rose-700 border-rose-200', Developing: 'bg-amber-100 text-amber-700 border-amber-200', Established: 'bg-indigo-100 text-indigo-700 border-indigo-200', Advanced: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+                                                    return <span className={`mt-1 px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border ${colors[lvl] ?? 'bg-slate-100 text-slate-500 border-slate-200'}`}>{lvl}</span>;
+                                                })()}
+                                            </div>
+                                        </div>
+
+                                        <div className="px-8 py-6 space-y-5">
+                                            {/* Response transcript */}
+                                            {entry.transcriptSlice && (
+                                                <details className="group">
+                                                    <summary className="flex items-center justify-between cursor-pointer select-none list-none px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors">
+                                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Your Response</span>
+                                                        <span className="text-[9px] text-slate-400 group-open:hidden">View ▾</span>
+                                                        <span className="text-[9px] text-slate-400 hidden group-open:inline">Close ▴</span>
+                                                    </summary>
+                                                    <div className="mt-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                                        <p className="text-sm text-slate-600 leading-relaxed font-medium">{entry.transcriptSlice}</p>
+                                                    </div>
+                                                </details>
+                                            )}
+
+                                            {/* How your answer grew (ZPD before/after) */}
+                                            {entry.act1Analysis && entry.probeAnalysis && (() => {
+                                                const signals = ['ownership_language', 'skill_language', 'impact_language'] as const;
+                                                const labels: Record<string, string> = { ownership_language: 'Personal ownership', skill_language: 'Skill specificity', impact_language: 'Impact on others' };
+                                                const anyChange = signals.some(s => entry.act1Analysis?.behavioural_evidence_signals?.[s] !== entry.probeAnalysis?.behavioural_evidence_signals?.[s]);
+                                                if (!anyChange) return null;
+                                                return (
+                                                    <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">How Your Answer Grew Under Probing</p>
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                            {signals.map(s => {
+                                                                const before = entry.act1Analysis?.behavioural_evidence_signals?.[s];
+                                                                const after = entry.probeAnalysis?.behavioural_evidence_signals?.[s];
+                                                                const improved = before === 'absent' && after === 'present';
+                                                                if (before === after && before === 'absent') return null;
+                                                                return (
+                                                                    <div key={s} className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded-xl border border-slate-100">
+                                                                        <span className="text-[10px] text-slate-600 font-medium">{labels[s]}</span>
+                                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-lg ${before === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>{before === 'present' ? '✓' : '–'}</span>
+                                                                            <span className="text-[9px] text-slate-300">→</span>
+                                                                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-lg ${after === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>{after === 'present' ? '✓' : '–'}</span>
+                                                                            {improved && <span className="text-emerald-500 font-black text-xs">↑</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            {entry.summaryReport && (() => {
+                                                const r = entry.summaryReport!;
+                                                const coachingLocked = !!r.selfAssessmentPrompt && !selfAssessmentResponses[entry.questionIndex];
+                                                return (
+                                                    <div className="space-y-4">
+                                                        {/* Answer overview */}
+                                                        {r.answerOverview && <p className="text-sm text-slate-700 leading-relaxed font-medium">{r.answerOverview}</p>}
+
+                                                        {/* Self-assessment gate (kept if present) */}
+                                                        {r.selfAssessmentPrompt && coachingLocked && (
+                                                            <div className="p-5 bg-indigo-50 border border-indigo-100 rounded-3xl space-y-3">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Before You Read the Coaching</p>
+                                                                <p className="text-sm font-medium text-indigo-900 italic leading-relaxed">{r.selfAssessmentPrompt}</p>
+                                                                <textarea
+                                                                    className="w-full text-sm text-slate-700 bg-white border border-indigo-200 rounded-2xl p-3 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-300"
+                                                                    rows={2}
+                                                                    placeholder="Write your honest self-assessment before reading the coaching..."
+                                                                    value={selfAssessmentDrafts[entry.questionIndex] || ''}
+                                                                    onChange={e => setSelfAssessmentDrafts(prev => ({ ...prev, [entry.questionIndex]: e.target.value }))}
+                                                                />
+                                                                <button
+                                                                    className="w-full text-[9px] font-black uppercase tracking-widest text-white bg-indigo-500 hover:bg-indigo-600 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-40"
+                                                                    disabled={!(selfAssessmentDrafts[entry.questionIndex] || '').trim()}
+                                                                    onClick={() => { const v = (selfAssessmentDrafts[entry.questionIndex] || '').trim(); if (v) setSelfAssessmentResponses(prev => ({ ...prev, [entry.questionIndex]: v })); }}
+                                                                >See Coaching →</button>
+                                                            </div>
+                                                        )}
+
+                                                        {!coachingLocked && (<>
+                                                            {/* Strengths */}
+                                                            {r.strengths?.length > 0 && (
+                                                                <div className="space-y-2">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">What You Did Well</p>
+                                                                    {r.strengths.map((s, i) => (
+                                                                        <div key={i} className="flex gap-3 p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+                                                                            <span className="text-emerald-500 font-black text-sm shrink-0">✓</span>
+                                                                            <p className="text-[12px] text-slate-700 font-medium leading-relaxed">{s}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Development points */}
+                                                            {r.developmentPoints?.length > 0 && (
+                                                                <div className="space-y-2">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-amber-600">Development Areas</p>
+                                                                    {r.developmentPoints.map((dp, i) => (
+                                                                        <div key={i} className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-1.5">
+                                                                            <p className="text-[11px] font-black text-amber-800">{dp.gap}</p>
+                                                                            <p className="text-[11px] text-slate-600 font-medium leading-relaxed">{dp.whyItMatters}</p>
+                                                                            <p className="text-[11px] text-slate-700 font-bold leading-relaxed border-l-2 border-amber-300 pl-3">{dp.instruction}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Probe engagement */}
+                                                            {(r.probeEngagement || r.probeCorrelation) && (
+                                                                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-2">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Probing Analysis</p>
+                                                                    {r.probeEngagement && <p className="text-[11px] text-indigo-800 font-medium leading-relaxed">{r.probeEngagement}</p>}
+                                                                    {r.probeCorrelation && <p className="text-[11px] text-indigo-700 leading-relaxed font-medium italic">{r.probeCorrelation}</p>}
+                                                                </div>
+                                                            )}
+
+                                                            {/* CV alignment */}
+                                                            {r.cvAlignmentNote && (
+                                                                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">CV Alignment</p>
+                                                                    <p className="text-[11px] text-slate-600 font-medium leading-relaxed">{r.cvAlignmentNote}</p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Integrated coaching */}
+                                                            {r.integratedCoaching && (
+                                                                <div className="p-5 bg-slate-900 rounded-3xl space-y-3">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Integrated Coaching</p>
+                                                                    <p className="text-sm font-bold text-white leading-relaxed">{r.integratedCoaching}</p>
+                                                                    {r.forwardOrientation && <p className="text-[11px] text-slate-400 font-medium leading-relaxed border-t border-white/10 pt-3">{r.forwardOrientation}</p>}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Practice task */}
+                                                            {r.practiceTask && (
+                                                                <div className="p-4 bg-indigo-600 rounded-2xl">
+                                                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-200">Practice Task</p>
+                                                                        <div className="flex items-center gap-2">
+                                                                            {targetRole && <span className="text-[8px] font-black bg-indigo-500 text-indigo-100 px-2 py-0.5 rounded-full">{targetRole}</span>}
+                                                                            {practiceDate && <span className="text-[8px] font-black bg-white/20 text-white px-2 py-0.5 rounded-full">By {practiceDate}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                    <p className="text-[12px] font-bold text-white leading-relaxed">{r.practiceTask}</p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* ELC stage trace */}
+                                                            {r.elcStages && (
+                                                                <details className="group">
+                                                                    <summary className="flex items-center gap-2 cursor-pointer select-none list-none px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors">
+                                                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Learning Cycle</span>
+                                                                        <span className="text-[9px] text-slate-400 ml-auto group-open:hidden">View ▾</span>
+                                                                        <span className="text-[9px] text-slate-400 ml-auto hidden group-open:inline">Close ▴</span>
+                                                                    </summary>
+                                                                    <div className="mt-2 grid grid-cols-2 gap-2 p-3">
+                                                                        {([['CE', 'Concrete Experience', r.elcStages.ce], ['RO', 'Reflective Observation', r.elcStages.ro], ['AC', 'Abstract Concept', r.elcStages.ac], ['AE', 'Experimentation', r.elcStages.ae]] as const).map(([code, label, text]) => (
+                                                                            <div key={code} className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                                                                                <div className="flex items-center gap-2 mb-1"><span className="text-[8px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">{code}</span><span className="text-[8px] font-black uppercase tracking-widest text-slate-400">{label}</span></div>
+                                                                                <p className="text-[10px] text-slate-600 font-medium leading-relaxed">{text}</p>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </details>
+                                                            )}
+
+                                                            {/* GUIDANCE — probing details */}
+                                                            {entry.probe && (
+                                                                <details className="group">
+                                                                    <summary className="flex items-center gap-2 cursor-pointer select-none list-none px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-slate-100 transition-colors">
+                                                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Follor-up Guidance</span>
+                                                                        <span className="text-[9px] text-slate-400 ml-auto group-open:hidden">View ▾</span>
+                                                                        <span className="text-[9px] text-slate-400 ml-auto hidden group-open:inline">Close ▴</span>
+                                                                    </summary>
+                                                                    <div className="mt-2 p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                                            <span className={`px-2.5 py-1 rounded-xl text-[8px] font-black uppercase tracking-widest ${entry.probe.probe_type === 'DEEPENING' ? 'bg-indigo-100 text-indigo-700' : entry.probe.probe_type === 'CLARIFYING' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{entry.probe.probe_type}</span>
+                                                                            {entry.probeAnalysis?.depth_delta && <span className={`px-2.5 py-1 rounded-xl text-[8px] font-black uppercase tracking-widest ${entry.probeAnalysis.depth_delta === 'increased' ? 'bg-emerald-100 text-emerald-700' : entry.probeAnalysis.depth_delta === 'decreased' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>Depth {entry.probeAnalysis.depth_delta}</span>}
+                                                                        </div>
+                                                                        <p className="text-[11px] text-slate-700 font-bold italic">"{entry.probe.probe}"</p>
+                                                                        {entry.probeAnalysis?.interpretation && <p className="text-[10px] text-slate-600 font-medium leading-relaxed">{entry.probeAnalysis.interpretation}</p>}
+                                                                    </div>
+                                                                </details>
+                                                            )}
+                                                        </>)}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         <ImprovementPlan feedback={detailedFeedback} />
+                        </>}
+
+                        {/* ── VISUAL FORMAT ─────────────────────────────────────────── */}
+                        {previewMode && reportFormat === 'visual' && (
+                        <div className="space-y-8">
+                            {/* Priority */}
+                            {(detailedFeedback.meritVectors?.primarySuggestionAnchor ?? detailedFeedback.actionableSuggestions?.[0]) && (
+                                <div className="p-6 bg-slate-900 rounded-[32px] border border-indigo-500/30">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-2">Your One Priority</p>
+                                    <p className="text-base font-bold text-white leading-relaxed">{detailedFeedback.meritVectors?.primarySuggestionAnchor ?? detailedFeedback.actionableSuggestions[0]}</p>
+                                </div>
+                            )}
+                            {/* STAR 4-column visual */}
+                            <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">STAR Breakdown · NCS 2025 Weightings</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {([
+                                        { key: 'situation' as const, label: 'Situation', weight: 15, color: 'bg-teal-500', light: 'bg-teal-50 border-teal-200 text-teal-700' },
+                                        { key: 'task' as const, label: 'Task', weight: 15, color: 'bg-blue-500', light: 'bg-blue-50 border-blue-200 text-blue-700' },
+                                        { key: 'action' as const, label: 'Action', weight: 60, color: 'bg-indigo-600', light: 'bg-indigo-50 border-indigo-200 text-indigo-700' },
+                                        { key: 'result' as const, label: 'Result', weight: 10, color: 'bg-purple-500', light: 'bg-purple-50 border-purple-200 text-purple-700' },
+                                    ]).map(s => (
+                                        <div key={s.key} className={`p-5 rounded-3xl border ${s.light} flex flex-col gap-3`}>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] font-black uppercase tracking-widest">{s.label}</span>
+                                                <span className={`text-xl font-black ${s.key === 'action' ? 'text-indigo-600' : ''}`}>{s.weight}%</span>
+                                            </div>
+                                            <div className="h-2 bg-white/60 rounded-full overflow-hidden">
+                                                <div className={`h-2 ${s.color} rounded-full`} style={{ width: `${s.weight === 60 ? 100 : s.weight === 15 ? 25 : 17}%` }} />
+                                            </div>
+                                            <p className="text-[11px] leading-relaxed font-medium">{detailedFeedback.starAnalysis[s.key]}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                            {/* Rubric bars */}
+                            <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Performance Scores</p>
+                                <div className="space-y-5">
+                                    {([
+                                        { label: 'STAR Completion', score: detailedFeedback.rubrics.starCompletion, note: detailedFeedback.rubrics.justifications.starCompletion },
+                                        { label: 'Evidence Specificity', score: detailedFeedback.rubrics.evidenceSpecificity, note: detailedFeedback.rubrics.justifications.evidenceSpecificity },
+                                        { label: 'Role Clarity', score: detailedFeedback.rubrics.roleClarity, note: detailedFeedback.rubrics.justifications.roleClarity },
+                                        { label: 'JD Alignment', score: detailedFeedback.rubrics.jdAlignment, note: detailedFeedback.rubrics.justifications.jdAlignment },
+                                        { label: 'Confidence', score: detailedFeedback.rubrics.confidence, note: detailedFeedback.rubrics.justifications.confidence },
+                                    ]).map(r => (
+                                        <div key={r.label}>
+                                            <div className="flex justify-between items-center mb-1.5">
+                                                <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">{r.label}</span>
+                                                <span className="text-[11px] font-black text-slate-900">{r.score}<span className="text-slate-300">/5</span></span>
+                                            </div>
+                                            <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                                <div className={`h-3 rounded-full transition-all duration-700 ${r.score >= 4 ? 'bg-indigo-600' : r.score === 3 ? 'bg-amber-500' : 'bg-rose-400'}`}
+                                                    style={{ width: `${r.score * 20}%` }} />
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 mt-1 font-medium">{r.note}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                            {/* Strengths & Weaknesses cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <section className="bg-emerald-50 p-6 rounded-[32px] border border-emerald-200 space-y-4">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Strengths</p>
+                                    {detailedFeedback.strengths.map((s, i) => {
+                                        const parts = s.split('|');
+                                        const headline = parts[0].trim();
+                                        const signal = parts.find(p => p.trim().startsWith('Signal:'))?.replace('Signal:', '').trim();
+                                        return (
+                                            <div key={i} className="bg-white rounded-2xl p-4 border border-emerald-100">
+                                                <div className="flex gap-3 items-start">
+                                                    <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                                                        <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[11px] font-bold text-slate-800 leading-relaxed">{headline}</p>
+                                                        {signal && <p className="text-[10px] text-emerald-700 font-medium mt-1">{signal}</p>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </section>
+                                <section className="bg-amber-50 p-6 rounded-[32px] border border-amber-200 space-y-4">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-amber-600">Development Areas</p>
+                                    {detailedFeedback.weaknesses.map((w, i) => {
+                                        const parts = w.split('|');
+                                        const headline = parts[0].trim();
+                                        const rewrite = parts.find(p => p.trim().startsWith('Interview-standard version:'))?.replace('Interview-standard version:', '').trim();
+                                        return (
+                                            <div key={i} className="bg-white rounded-2xl p-4 border border-amber-100">
+                                                <div className="flex gap-3 items-start">
+                                                    <div className="w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                                                        <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[11px] font-bold text-slate-800 leading-relaxed">{headline}</p>
+                                                        {rewrite && <p className="text-[10px] text-amber-800 italic mt-2 border-l-2 border-amber-300 pl-2">{rewrite}</p>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </section>
+                            </div>
+                            {/* Merit vectors bars */}
+                            {detailedFeedback.meritVectors && (
+                                <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Behavioural Evidence Signals</p>
+                                    <div className="space-y-4">
+                                        {([
+                                            { label: 'Personal Agency', score: detailedFeedback.meritVectors!.personalAgency.score, basis: detailedFeedback.meritVectors!.personalAgency.evidenceBasis },
+                                            { label: 'Skill Specificity', score: detailedFeedback.meritVectors!.skillSpecificity.score, basis: detailedFeedback.meritVectors!.skillSpecificity.evidenceBasis },
+                                            { label: 'Impact Articulation', score: detailedFeedback.meritVectors!.impactArticulation.score, basis: detailedFeedback.meritVectors!.impactArticulation.evidenceBasis },
+                                        ]).map(v => (
+                                            <div key={v.label}>
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">{v.label}</span>
+                                                    <span className="text-[11px] font-black tabular-nums">{v.score}<span className="text-slate-300">/100</span></span>
+                                                </div>
+                                                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                                    <div className={`h-2.5 rounded-full ${v.score >= 70 ? 'bg-indigo-600' : v.score >= 50 ? 'bg-amber-500' : 'bg-rose-400'}`}
+                                                        style={{ width: `${v.score}%` }} />
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 mt-1 font-medium">{v.basis}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                            )}
+                            {/* Keywords pills */}
+                            <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4">Keyword Coverage</p>
+                                <div className="space-y-3">
+                                    <div className="flex flex-wrap gap-2">
+                                        {detailedFeedback.keywordCoverage.found.map(k => (
+                                            <span key={k} className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-black border border-emerald-200">{k}</span>
+                                        ))}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {detailedFeedback.keywordCoverage.missing.map(k => (
+                                            <span key={k} className="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-full text-[10px] font-black border border-slate-200 line-through decoration-rose-400">{k}</span>
+                                        ))}
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 font-medium">Green = present · Strikethrough = not used</p>
+                                </div>
+                            </section>
+                            {/* Career roadmap */}
+                            <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Development Roadmap</p>
+                                <div className="flex flex-col gap-3">
+                                    {detailedFeedback.careerDevelopment.nextSteps.map((step, i) => (
+                                        <div key={i} className="flex gap-4 items-start">
+                                            <div className="w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">{i + 1}</div>
+                                            <p className="text-[12px] font-medium text-slate-700 leading-relaxed pt-1">{step}</p>
+                                        </div>
+                                    ))}
+                                    {detailedFeedback.careerDevelopment.certifications.map((cert, i) => (
+                                        <div key={`cert-${i}`} className="flex gap-4 items-start">
+                                            <div className="w-7 h-7 bg-amber-400 text-white rounded-full flex items-center justify-center shrink-0">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>
+                                            </div>
+                                            <p className="text-[12px] font-medium text-slate-700 leading-relaxed pt-1">{cert}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        </div>
+                        )}
+
+                        {/* ── DIGEST FORMAT ─────────────────────────────────────────── */}
+                        {previewMode && reportFormat === 'digest' && (
+                        <div className="space-y-5">
+                            {/* At-a-glance header */}
+                            <div className="p-6 bg-slate-900 rounded-[32px] border border-indigo-500/20">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-4">Session At a Glance</p>
+                                <div className="grid grid-cols-5 gap-3 mb-4">
+                                    {([
+                                        { label: 'STAR', score: detailedFeedback.rubrics.starCompletion },
+                                        { label: 'Evidence', score: detailedFeedback.rubrics.evidenceSpecificity },
+                                        { label: 'Clarity', score: detailedFeedback.rubrics.roleClarity },
+                                        { label: 'Alignment', score: detailedFeedback.rubrics.jdAlignment },
+                                        { label: 'Confidence', score: detailedFeedback.rubrics.confidence },
+                                    ]).map(r => (
+                                        <div key={r.label} className="text-center">
+                                            <div className={`text-2xl font-black ${r.score >= 4 ? 'text-indigo-400' : r.score === 3 ? 'text-amber-400' : 'text-rose-400'}`}>{r.score}<span className="text-slate-600 text-sm">/5</span></div>
+                                            <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">{r.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Priority</p>
+                                <p className="text-sm font-bold text-white leading-relaxed">{detailedFeedback.meritVectors?.primarySuggestionAnchor ?? detailedFeedback.actionableSuggestions[0]}</p>
+                            </div>
+                            {/* Strengths bullets */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-3">What Worked</p>
+                                <ul className="space-y-2">
+                                    {detailedFeedback.strengths.map((s, i) => (
+                                        <li key={i} className="flex gap-3 items-start">
+                                            <span className="text-emerald-500 font-black text-base leading-none mt-0.5">✓</span>
+                                            <span className="text-[12px] font-medium text-slate-700 leading-relaxed">{s.split('|')[0].trim()}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            {/* Weaknesses bullets */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-3">Development Areas</p>
+                                <ul className="space-y-2">
+                                    {detailedFeedback.weaknesses.map((w, i) => (
+                                        <li key={i} className="flex gap-3 items-start">
+                                            <span className="text-amber-500 font-black text-base leading-none mt-0.5">△</span>
+                                            <span className="text-[12px] font-medium text-slate-700 leading-relaxed">{w.split('|')[0].trim()}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            {/* Suggestions numbered */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600 mb-3">Actionable Steps</p>
+                                <ol className="space-y-3">
+                                    {detailedFeedback.actionableSuggestions.map((s, i) => {
+                                        const rewrite = s.split('|').find(p => p.trim().startsWith('Rewrite:'))?.replace('Rewrite:', '').trim() ?? s.split('|')[0].trim();
+                                        return (
+                                            <li key={i} className="flex gap-3 items-start">
+                                                <span className="w-5 h-5 bg-indigo-600 text-white rounded-full text-[9px] font-black flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                                                <span className="text-[12px] font-medium text-slate-700 leading-relaxed">{rewrite}</span>
+                                            </li>
+                                        );
+                                    })}
+                                </ol>
+                            </div>
+                            {/* STAR one-liner per component */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">STAR Status</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {([
+                                        { label: 'S · Situation', text: detailedFeedback.starAnalysis.situation, w: 15 },
+                                        { label: 'T · Task', text: detailedFeedback.starAnalysis.task, w: 15 },
+                                        { label: 'A · Action', text: detailedFeedback.starAnalysis.action, w: 60 },
+                                        { label: 'R · Result', text: detailedFeedback.starAnalysis.result, w: 10 },
+                                    ]).map(c => (
+                                        <div key={c.label} className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{c.label}</span>
+                                                <span className="text-[9px] font-black text-indigo-600">{c.w}%</span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-600 leading-snug font-medium">{c.text.split('.')[0]}.</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            {/* Keywords compact */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Keywords</p>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                    {detailedFeedback.keywordCoverage.found.map(k => <span key={k} className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[9px] font-black">{k}</span>)}
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {detailedFeedback.keywordCoverage.missing.map(k => <span key={k} className="px-2.5 py-1 bg-slate-100 text-slate-400 rounded-full text-[9px] font-black line-through">{k}</span>)}
+                                </div>
+                            </div>
+                            {/* Practice tasks from per-question reports */}
+                            {sessionLog.some(e => e.summaryReport?.practiceTask) && (
+                                <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                                    <div className="flex items-start justify-between gap-4 mb-4">
+                                        <div>
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600">Practice Tasks</p>
+                                            {targetRole && <p className="text-[10px] text-slate-400 font-medium mt-0.5">For your {targetRole} interview</p>}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 whitespace-nowrap">Do these by</label>
+                                            <input
+                                                type="text"
+                                                value={practiceDate}
+                                                onChange={e => setPracticeDate(e.target.value)}
+                                                placeholder="e.g. Friday"
+                                                className="w-28 px-3 py-1.5 rounded-xl border border-slate-200 text-[11px] font-bold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-400"
+                                            />
+                                        </div>
+                                    </div>
+                                    <ul className="space-y-3">
+                                        {sessionLog.filter(e => e.summaryReport?.practiceTask).map((e, i) => (
+                                            <li key={i} className="flex gap-3 items-start p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                <span className="text-indigo-500 font-black text-base leading-none mt-0.5 shrink-0">→</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{e.summaryReport!.practiceTask}</p>
+                                                    {practiceDate && (
+                                                        <p className="text-[9px] font-black text-indigo-500 mt-1.5">Complete by {practiceDate}</p>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                        )}
+
+                        {/* ── FOCUS FORMAT ──────────────────────────────────────────── */}
+                        {previewMode && reportFormat === 'focus' && (
+                        <div className="space-y-8">
+                            {focusSection === 'star' && (
+                                <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm space-y-6">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl"><Target size={20} /></div>
+                                        <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">STAR Analysis</h3>
+                                    </div>
+                                    <p className="text-slate-700 leading-relaxed font-medium">{detailedFeedback.overallStarSynthesis}</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {([
+                                            { label: 'Situation', weight: 15, text: detailedFeedback.starAnalysis.situation },
+                                            { label: 'Task', weight: 15, text: detailedFeedback.starAnalysis.task },
+                                            { label: 'Action', weight: 60, text: detailedFeedback.starAnalysis.action },
+                                            { label: 'Result', weight: 10, text: detailedFeedback.starAnalysis.result },
+                                        ]).map(s => (
+                                            <div key={s.label} className={`p-5 rounded-3xl border ${s.label === 'Action' ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'}`}>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{s.label}</span>
+                                                    <span className={`text-sm font-black ${s.label === 'Action' ? 'text-indigo-600' : 'text-slate-400'}`}>{s.weight}% weight</span>
+                                                </div>
+                                                <p className="text-[12px] text-slate-700 leading-relaxed font-medium">{s.text}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                            )}
+                            {focusSection === 'feedback' && (
+                                <section className="space-y-6">
+                                    <div className="bg-emerald-50 p-8 rounded-[40px] border border-emerald-200">
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl"><CheckCircle2 size={20} /></div>
+                                            <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Strengths</h3>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {detailedFeedback.strengths.map((s, i) => {
+                                                const parts = s.split('|');
+                                                return (
+                                                    <div key={i} className="bg-white rounded-2xl p-5 border border-emerald-100">
+                                                        <p className="text-[11px] font-bold text-slate-800 leading-relaxed mb-2">{parts[0].trim()}</p>
+                                                        {parts.slice(1).map((p, j) => <p key={j} className="text-[11px] text-slate-600 font-medium leading-relaxed">{p.trim()}</p>)}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                    <div className="bg-amber-50 p-8 rounded-[40px] border border-amber-200">
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <div className="p-2 bg-amber-100 text-amber-600 rounded-xl"><ShieldAlert size={20} /></div>
+                                            <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Development Areas</h3>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {detailedFeedback.weaknesses.map((w, i) => {
+                                                const parts = w.split('|');
+                                                return (
+                                                    <div key={i} className="bg-white rounded-2xl p-5 border border-amber-100">
+                                                        <p className="text-[11px] font-bold text-slate-800 leading-relaxed mb-2">{parts[0].trim()}</p>
+                                                        {parts.slice(1).map((p, j) => <p key={j} className="text-[11px] text-slate-600 font-medium leading-relaxed">{p.trim()}</p>)}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </section>
+                            )}
+                            {focusSection === 'coaching' && (
+                                <section className="space-y-6">
+                                    <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl"><Sparkles size={20} /></div>
+                                            <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Coaching &amp; Suggestions</h3>
+                                        </div>
+                                        <div className="space-y-5">
+                                            {detailedFeedback.actionableSuggestions.map((s, i) => {
+                                                const parts = s.split('|');
+                                                const moment = parts.find(p => p.trim().startsWith('Moment:'))?.replace('Moment:', '').trim();
+                                                const rewrite = parts.find(p => p.trim().startsWith('Rewrite:'))?.replace('Rewrite:', '').trim();
+                                                const reinforce = parts.find(p => p.trim().startsWith('Reinforce:'))?.replace('Reinforce:', '').trim();
+                                                return (
+                                                    <div key={i} className="border border-slate-200 rounded-3xl overflow-hidden">
+                                                        {moment && <div className="bg-slate-50 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{moment}</div>}
+                                                        {rewrite && <div className="bg-indigo-600 px-5 py-4"><p className="text-[12px] font-bold text-white leading-relaxed italic">"{rewrite}"</p></div>}
+                                                        {reinforce && <div className="px-5 py-3"><p className="text-[11px] text-slate-600 font-medium leading-relaxed">{reinforce}</p></div>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                    {detailedFeedback.transcriptAnnotations && detailedFeedback.transcriptAnnotations.length > 0 && (
+                                        <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Your Words → Interview Standard</p>
+                                            <div className="space-y-4">
+                                                {detailedFeedback.transcriptAnnotations.map((a, i) => (
+                                                    <div key={i} className="rounded-2xl border border-slate-200 overflow-hidden">
+                                                        <div className="bg-slate-50 px-5 py-3 text-[10px] text-slate-500 font-medium">{a.moment}</div>
+                                                        <div className="bg-indigo-600 px-5 py-4"><p className="text-[12px] font-bold text-white italic">"{a.standardVersion}"</p></div>
+                                                        <div className="px-5 py-3"><p className="text-[11px] text-slate-500 font-medium">{a.principle}</p></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+                            {focusSection === 'insights' && detailedFeedback.meritVectors && (
+                                <section className="space-y-6">
+                                    <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <div className="flex items-center gap-3 mb-6">
+                                            <div className="p-2 bg-purple-100 text-purple-600 rounded-xl"><Layers size={20} /></div>
+                                            <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Research Insights</h3>
+                                        </div>
+                                        <div className="space-y-5">
+                                            {([
+                                                { label: 'Personal Agency', score: detailedFeedback.meritVectors!.personalAgency.score, basis: detailedFeedback.meritVectors!.personalAgency.evidenceBasis, ref: 'Merit Vector' },
+                                                { label: 'Skill Specificity', score: detailedFeedback.meritVectors!.skillSpecificity.score, basis: detailedFeedback.meritVectors!.skillSpecificity.evidenceBasis, ref: 'Merit Vector' },
+                                                { label: 'Impact Articulation', score: detailedFeedback.meritVectors!.impactArticulation.score, basis: detailedFeedback.meritVectors!.impactArticulation.evidenceBasis, ref: 'Merit Vector' },
+                                            ]).map(v => (
+                                                <div key={v.label} className="p-5 bg-slate-50 rounded-3xl border border-slate-100">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">{v.label}</span>
+                                                        <span className="text-xl font-black text-indigo-600">{v.score}<span className="text-slate-300 text-sm">/100</span></span>
+                                                    </div>
+                                                    <div className="h-2 bg-slate-200 rounded-full mb-3"><div className={`h-2 rounded-full ${v.score >= 70 ? 'bg-indigo-600' : v.score >= 50 ? 'bg-amber-500' : 'bg-rose-400'}`} style={{ width: `${v.score}%` }} /></div>
+                                                    <p className="text-[11px] text-slate-600 font-medium leading-relaxed">{v.basis}</p>
+                                                    <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">{v.ref}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {detailedFeedback.scaffoldedLearningSignal && (
+                                            <div className="mt-6 p-5 bg-indigo-50 rounded-3xl border border-indigo-100">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600 mb-2">ZPD Scaffold Dependency</p>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="text-2xl font-black text-indigo-600">{detailedFeedback.scaffoldedLearningSignal!.scaffoldDependency.score}<span className="text-indigo-300 text-sm">/100</span></div>
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700">{detailedFeedback.scaffoldedLearningSignal!.scaffoldDependency.interpretation}</p>
+                                                        <p className="text-[10px] text-indigo-600 font-medium mt-0.5">{detailedFeedback.scaffoldedLearningSignal!.zpdProgressionObservation}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </section>
+                            )}
+                            {focusSection === 'cv' && (
+                                <section className="space-y-6">
+                                    {detailedFeedback.cvMissedOpportunities && detailedFeedback.cvMissedOpportunities.length > 0 ? (
+                                        <div className="bg-amber-50 p-8 rounded-[40px] border-2 border-amber-200 space-y-5">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-amber-600">CV Evidence You Didn't Deploy</p>
+                                            {detailedFeedback.cvMissedOpportunities.map((opp, i) => (
+                                                <div key={i} className="bg-white rounded-3xl p-6 border border-amber-100 space-y-3">
+                                                    <div><span className="text-[9px] font-black uppercase tracking-widest text-amber-500">CV Item</span><p className="text-sm font-bold text-slate-800 mt-1">{opp.cvItem}</p></div>
+                                                    <div><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Where It Applied</span><p className="text-[12px] text-slate-600 font-medium mt-1">{opp.questionContext}</p></div>
+                                                    <div><span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Why It Fits</span><p className="text-[12px] text-slate-600 font-medium mt-1">{opp.whyItFits}</p></div>
+                                                    <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200"><span className="text-[9px] font-black uppercase tracking-widest text-amber-600">How to Use It</span><p className="text-[12px] text-amber-900 font-bold italic mt-1">"{opp.exampleUsage}"</p></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="p-8 bg-emerald-50 rounded-[40px] border border-emerald-200 text-center">
+                                            <p className="text-sm font-bold text-emerald-700">No CV gaps identified — your examples deployed your background well.</p>
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+                            {focusSection === 'practice' && (
+                                <section className="space-y-5">
+                                    <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <div className="flex items-start justify-between gap-4 mb-6">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl"><TrendingUp size={20} /></div>
+                                                <div>
+                                                    <h3 className="text-lg font-black uppercase tracking-widest text-slate-900">Practice Tasks</h3>
+                                                    {targetRole && <p className="text-[10px] text-slate-400 font-medium mt-0.5">For your {targetRole} interview</p>}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 whitespace-nowrap">Do these by</label>
+                                                <input
+                                                    type="text"
+                                                    value={practiceDate}
+                                                    onChange={e => setPracticeDate(e.target.value)}
+                                                    placeholder="e.g. Friday"
+                                                    className="w-28 px-3 py-1.5 rounded-xl border border-slate-200 text-[11px] font-bold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-400"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {sessionLog.filter(e => e.summaryReport?.practiceTask).map((e, i) => (
+                                                <div key={i} className="p-5 bg-slate-50 rounded-3xl border border-slate-100">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Q{i + 1} · {e.questionText.substring(0, 60)}…</p>
+                                                    <p className="text-[12px] font-bold text-slate-800 leading-relaxed">{e.summaryReport!.practiceTask}</p>
+                                                    {practiceDate && <p className="text-[9px] font-black text-indigo-500 mt-2">Complete by {practiceDate}</p>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Recommended Development</p>
+                                        <div className="space-y-4">
+                                            {detailedFeedback.careerDevelopment.nextSteps.map((step, i) => (
+                                                <div key={i} className="flex gap-4 items-start">
+                                                    <div className="w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">{i + 1}</div>
+                                                    <p className="text-[12px] font-medium text-slate-700 leading-relaxed pt-1">{step}</p>
+                                                </div>
+                                            ))}
+                                            {detailedFeedback.careerDevelopment.certifications.map((cert, i) => (
+                                                <div key={`cert-${i}`} className="flex gap-4 items-start">
+                                                    <Award size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                                                    <p className="text-[12px] font-medium text-slate-700 leading-relaxed">{cert}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </section>
+                            )}
+                        </div>
+                        )}
+
                         </>
                     ) : (
                         <div className="text-center py-20">
@@ -1980,6 +3626,9 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     )}
                                     {condition !== 'minimal' && (
                                         <span className="text-[9px] font-black text-slate-400 tabular-nums">{currentQuestionIndex + 1}/{activeQuestions.length}</span>
+                                    )}
+                                    {demoMode && (
+                                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[8px] font-black uppercase tracking-widest border border-amber-200">Demo</span>
                                     )}
                                 </div>
                                 {condition !== 'minimal' && (
@@ -2402,6 +4051,27 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                             {activeTab === 'report' && (
                                 <div id="ascend-toolkit-reports" className="space-y-4 animate-fade-in">
                                     <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Session Record</h4>
+
+                                    {/* Learning Intention — set before session, assessed in feedback (SDT autonomy + goal-setting theory) */}
+                                    {!detailedFeedback ? (
+                                        <div className="p-3 bg-violet-50 border border-violet-200 rounded-2xl space-y-2">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-violet-500">Session Learning Goal</p>
+                                            <p className="text-[10px] text-slate-500 leading-relaxed">What do you most want to improve in today's practice? Your feedback will assess whether you achieved it.</p>
+                                            <textarea
+                                                value={learningIntention}
+                                                onChange={e => setLearningIntention(e.target.value)}
+                                                placeholder="e.g. I want to give stronger Result statements with a specific outcome or number..."
+                                                className="w-full text-[11px] text-slate-700 bg-white border border-violet-200 rounded-xl p-2 resize-none focus:outline-none focus:ring-1 focus:ring-violet-400 placeholder:text-slate-300"
+                                                rows={2}
+                                            />
+                                        </div>
+                                    ) : detailedFeedback.intentionAssessment ? (
+                                        <div className="p-3 bg-violet-50 border border-violet-200 rounded-2xl space-y-1">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-violet-500">Goal Achievement</p>
+                                            {learningIntention && <p className="text-[9px] text-violet-400 italic">Your goal: {learningIntention}</p>}
+                                            <p className="text-[11px] font-medium text-violet-900 leading-relaxed">{detailedFeedback.intentionAssessment}</p>
+                                        </div>
+                                    ) : null}
                                     {sessionLog.length === 0 ? (
                                         <div className="flex flex-col items-center gap-4 py-12 opacity-30">
                                             <div className="p-6 bg-slate-100 rounded-full">
@@ -2419,17 +4089,120 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                         <span className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Q{entry.questionIndex + 1} · {CATEGORIES[entry.questionIndex] || 'General'}</span>
                                                         <p className="text-[11px] font-bold text-slate-800 mt-1 leading-tight line-clamp-2">&ldquo;{entry.questionText}&rdquo;</p>
                                                     </div>
-                                                    <div className="flex gap-1 shrink-0">
-                                                        {['S', 'T', 'A', 'R'].map((s, i) => (
-                                                            <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black ${i <= entry.starPhaseReached ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'
-                                                                }`}>{s}</div>
-                                                        ))}
+                                                    <div className="flex flex-col items-end gap-0.5 shrink-0">
+                                                        <div className="flex gap-1">
+                                                            {['S', 'T', 'A', 'R'].map((s, i) => (
+                                                                <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black ${i <= entry.starPhaseReached ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>{s}</div>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex gap-1">
+                                                            {(['situation','task','action','result'] as const).map((comp, i) => {
+                                                                const st = entry.probeAnalysis?.star_status?.[comp];
+                                                                const score = st === 'complete' ? 100 : st === 'partial' ? 50 : st === 'missing' ? 0 : null;
+                                                                const label = score !== null ? (score >= 80 ? '5★' : score >= 50 ? '3★' : '1★') : ['15%','15%','60%','10%'][i];
+                                                                const color = score === null ? (i === 2 ? 'text-indigo-300' : 'text-slate-200') : score >= 80 ? 'text-emerald-500' : score >= 50 ? 'text-amber-500' : 'text-rose-400';
+                                                                return <div key={i} title={score !== null ? `${comp}: ${score >= 80 ? '5★' : score >= 50 ? '3★' : '1★'} · NCS weight ${['15','15','60','10'][i]}%` : `NCS weight ${['15','15','60','10'][i]}%`} className={`w-5 text-center text-[7px] font-bold ${color}`}>{label}</div>;
+                                                            })}
+                                                        </div>
                                                     </div>
                                                 </div>
+
+                                                {/* RESPONSE — candidate's actual transcript for this question */}
+                                                {entry.transcriptSlice && (
+                                                    <details className="group">
+                                                        <summary className="flex items-center justify-between cursor-pointer select-none list-none p-2.5 bg-slate-50 rounded-xl border border-slate-100 hover:bg-slate-100 transition-colors">
+                                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Your Response</span>
+                                                            <span className="text-[9px] text-slate-400 group-open:hidden">View ▾</span>
+                                                            <span className="text-[9px] text-slate-400 hidden group-open:inline">Close ▴</span>
+                                                        </summary>
+                                                        <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 max-h-40 overflow-y-auto">
+                                                            <p className="text-[10px] text-slate-600 leading-relaxed whitespace-pre-wrap font-medium">{entry.transcriptSlice}</p>
+                                                        </div>
+                                                    </details>
+                                                )}
 
                                                 {/* Rich Summary Report */}
                                                 {entry.summaryReport ? (
                                                     <div className="space-y-3">
+                                                        {/* FEEDBACK label */}
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-300">Feedback</span>
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                        </div>
+
+                                                        {/* Component 1 — Self-Assessment Prompt (Boud & Molloy 2013: active metacognition before coaching unlocks) */}
+                                                        {entry.summaryReport.selfAssessmentPrompt && (
+                                                            <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl space-y-2">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500">Before You Read the Coaching</p>
+                                                                <p className="text-[11px] font-medium text-indigo-900 leading-relaxed italic">{entry.summaryReport.selfAssessmentPrompt}</p>
+                                                                {!selfAssessmentResponses[entry.questionIndex] ? (
+                                                                    <>
+                                                                        <textarea
+                                                                            className="w-full text-[11px] text-slate-700 bg-white border border-indigo-200 rounded-xl p-2 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-300"
+                                                                            rows={2}
+                                                                            placeholder="Write your honest self-assessment here before reading the coaching..."
+                                                                            value={selfAssessmentDrafts[entry.questionIndex] || ''}
+                                                                            onChange={e => setSelfAssessmentDrafts(prev => ({ ...prev, [entry.questionIndex]: e.target.value }))}
+                                                                        />
+                                                                        <button
+                                                                            className="w-full text-[9px] font-black uppercase tracking-widest text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-2 rounded-xl transition-colors disabled:opacity-40"
+                                                                            disabled={!(selfAssessmentDrafts[entry.questionIndex] || '').trim()}
+                                                                            onClick={() => {
+                                                                                const r = (selfAssessmentDrafts[entry.questionIndex] || '').trim();
+                                                                                if (r) setSelfAssessmentResponses(prev => ({ ...prev, [entry.questionIndex]: r }));
+                                                                            }}
+                                                                        >
+                                                                            See Coaching →
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <div className="p-2 bg-indigo-100 rounded-xl">
+                                                                        <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-1">Your Self-Assessment</p>
+                                                                        <p className="text-[10px] text-indigo-800 italic leading-relaxed">{selfAssessmentResponses[entry.questionIndex]}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Before/After Comparison — ZPD gap made visible (Vygotsky 1978) */}
+                                                        {(!entry.summaryReport.selfAssessmentPrompt || selfAssessmentResponses[entry.questionIndex]) && entry.act1Analysis && entry.probeAnalysis && (() => {
+                                                            const signals = ['ownership_language', 'skill_language', 'impact_language'] as const;
+                                                            const labels: Record<string, string> = { ownership_language: 'Personal ownership', skill_language: 'Skill specificity', impact_language: 'Impact on others' };
+                                                            const anyChange = signals.some(s =>
+                                                                entry.act1Analysis?.behavioural_evidence_signals?.[s] !== entry.probeAnalysis?.behavioural_evidence_signals?.[s]
+                                                            );
+                                                            if (!anyChange) return null;
+                                                            return (
+                                                                <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">How Your Answer Grew</p>
+                                                                    <div className="space-y-1.5">
+                                                                        {signals.map(s => {
+                                                                            const before = entry.act1Analysis?.behavioural_evidence_signals?.[s];
+                                                                            const after = entry.probeAnalysis?.behavioural_evidence_signals?.[s];
+                                                                            const improved = before === 'absent' && after === 'present';
+                                                                            const unchanged = before === after;
+                                                                            if (unchanged && before === 'absent') return null;
+                                                                            return (
+                                                                                <div key={s} className="flex items-center justify-between gap-2">
+                                                                                    <span className="text-[10px] text-slate-600">{labels[s]}</span>
+                                                                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${before === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{before === 'present' ? '✓' : '–'}</span>
+                                                                                        <span className="text-[8px] text-slate-300">→</span>
+                                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${after === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{after === 'present' ? '✓' : '–'}</span>
+                                                                                        {improved && <span className="text-[9px] text-emerald-600 font-black ml-0.5">↑</span>}
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        {/* Gate coaching content on self-assessment submission when prompt exists */}
+                                                        {entry.summaryReport.selfAssessmentPrompt && !selfAssessmentResponses[entry.questionIndex] ? null : (<>
+
                                                         {/* Competency Demonstration Level badge */}
                                                         {entry.summaryReport.competencyDemonstrationLevel && (() => {
                                                             const lvl = entry.summaryReport.competencyDemonstrationLevel!;
@@ -2467,6 +4240,13 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                                 </ul>
                                                             </div>
                                                         )}
+
+                                                        {/* GUIDANCE divider */}
+                                                        <div className="flex items-center gap-2 pt-1">
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-300">Guidance</span>
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                        </div>
 
                                                         {/* Development Points */}
                                                         {entry.summaryReport.developmentPoints.length > 0 && (
@@ -2538,10 +4318,19 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                             </div>
                                                         )}
 
+                                                        {/* AMO Performance Context — shown when conditions affected performance */}
+                                                        {entry.summaryReport.amoContextNote && (
+                                                            <div className="p-3 bg-amber-50 border border-amber-100 rounded-2xl">
+                                                                <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-1">Performance Context</p>
+                                                                <p className="text-[11px] font-medium text-slate-700 leading-relaxed">{entry.summaryReport.amoContextNote}</p>
+                                                            </div>
+                                                        )}
+
                                                         {/* Per-question Kolb ELC stage trace */}
                                                         {entry.summaryReport.elcStages && (
                                                             <ELCQuestionTrace stages={entry.summaryReport.elcStages} />
                                                         )}
+                                                        </>)}
                                                     </div>
                                                 ) : entry.probeAnalysis ? (
                                                     /* Fallback: pill summary while report generates */
@@ -2565,11 +4354,37 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                     <p className="text-[10px] text-slate-400 font-medium italic">No probe was triggered for this question.</p>
                                                 )}
 
-                                                {/* Probe Card */}
+                                                {/* PROBING section */}
                                                 {entry.probe && (
-                                                    <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
-                                                        <span className="text-[8px] font-black uppercase tracking-widest text-indigo-400">Probe · {entry.probe.probe_type.replace(/_/g, ' ')}</span>
-                                                        <p className="text-[11px] font-bold text-indigo-900 mt-1 leading-tight">&ldquo;{entry.probe.probe}&rdquo;</p>
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-300">Probing</span>
+                                                            <div className="flex-1 h-px bg-slate-100" />
+                                                        </div>
+                                                        <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
+                                                            <span className="text-[8px] font-black uppercase tracking-widest text-indigo-400">Follow-up · {entry.probe.probe_type.replace(/_/g, ' ')}</span>
+                                                            <p className="text-[11px] font-bold text-indigo-900 mt-1 leading-tight">&ldquo;{entry.probe.probe}&rdquo;</p>
+                                                            {entry.probe.rationale && (
+                                                                <p className="text-[9px] text-indigo-500 mt-1.5 leading-relaxed italic">{entry.probe.rationale}</p>
+                                                            )}
+                                                        </div>
+                                                        {entry.probeAnalysis && (
+                                                            <div className="px-3 py-2 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
+                                                                <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Probing Outcome</p>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.probeAnalysis.depth_delta === 'increased' ? 'bg-emerald-100 text-emerald-700' : entry.probeAnalysis.depth_delta === 'decreased' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                                        Depth {entry.probeAnalysis.depth_delta}
+                                                                    </span>
+                                                                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.probeAnalysis.probe_successful ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                        {entry.probeAnalysis.probe_successful ? 'Probe effective' : 'Partial response'}
+                                                                    </span>
+                                                                </div>
+                                                                {entry.probeAnalysis.interpretation && (
+                                                                    <p className="text-[9px] text-slate-600 leading-relaxed">{entry.probeAnalysis.interpretation}</p>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
 
@@ -2599,6 +4414,61 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 </div>
                                             </div>
                                         ))
+                                    )}
+
+                                    {/* Questions to Ask — NCS (2025) + Prospects (2025) */}
+                                    {detailedFeedback && sessionLog.length > 0 && (
+                                        <div className="bg-white border border-emerald-100 rounded-[24px] p-5 space-y-4 shadow-sm">
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Interview Preparation · Questions to Ask</p>
+                                                <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                                                    Preparing questions demonstrates commitment and helps you make an informed decision.{' '}
+                                                    <span className="text-slate-400 italic">National Careers Service (2025)</span>
+                                                </p>
+                                            </div>
+
+                                            <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-2xl space-y-2">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-700">NCS Guidance</p>
+                                                <ul className="space-y-1.5">
+                                                    {[
+                                                        'Best questions relate to career progression, opportunities, and training in this role',
+                                                        'Research salary for equivalent roles before your interview in case you need to negotiate',
+                                                        'Politely ask for time to consider any decisions — you do not have to accept on the spot',
+                                                        'Express your appreciation at the close of the interview'
+                                                    ].map((tip, i) => (
+                                                        <li key={i} className="text-[10px] text-slate-700 leading-relaxed flex gap-2">
+                                                            <span className="text-emerald-500 font-black shrink-0">→</span>
+                                                            {tip}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+
+                                            <div>
+                                                <p className="text-[8px] font-black uppercase tracking-widest text-slate-400 mb-2">7 Questions to Ask · Prospects (2025)</p>
+                                                <div className="space-y-2">
+                                                    {[
+                                                        `What does a typical day look like in the ${targetRole} role?`,
+                                                        'How would you describe the team I would be working with?',
+                                                        'What are the biggest challenges someone new to this role might face in the first few months?',
+                                                        'What training and professional development opportunities are available?',
+                                                        'How is success measured in this role, and what would I need to achieve in my first three months?',
+                                                        'What are the opportunities for progression within the organisation?',
+                                                        'What do you enjoy most about working here?'
+                                                    ].map((q, i) => (
+                                                        <div key={i} className="flex gap-2 items-start p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                                                            <span className="text-[8px] font-black text-indigo-400 bg-indigo-50 rounded-full w-5 h-5 flex items-center justify-center shrink-0">{i + 1}</span>
+                                                            <p className="text-[10px] font-medium text-slate-700 leading-relaxed">{q}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="p-3 bg-slate-800 rounded-2xl">
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">One Tip</p>
+                                                <p className="text-[10px] font-bold text-white leading-relaxed">Have 2–3 questions ready. If the interviewer already answers one during the conversation, move to the next — this shows you are engaged rather than working through a prepared list.</p>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             )}

@@ -319,6 +319,46 @@ SDT describes conditions of the learning *environment*, not stable traits of the
 
 ---
 
+**SDT and Kolb ELC — why they are not competing frameworks:**
+SDT explains *what conditions make the ELC cycle complete*. Without autonomy, Concrete Experience is compliance, not engagement — the candidate performs but does not internalise. Without competence feedback, Abstract Conceptualisation stalls — the candidate cannot form transferable principles from an experience they cannot evaluate. Without relatedness, Reflective Observation is self-criticism rather than inquiry. SDT is therefore the environmental prerequisite that makes Kolb's cycle functional. In AscendX terms: design decisions that satisfy SDT needs are what allow the learning cycle to close, and the MesoAccumulator's cross-session signals (feedbackOrientationDelta, forwardOrientationActioned) are the empirical tests of whether the cycle IS closing.
+
+---
+
+### 5.0a Impression Management — Coaching Competency, Not a Deception Signal
+**Sources:**
+- Goffman, E. (1959). *The Presentation of Self in Everyday Life.* Doubleday.
+- Leary, M.R., & Kowalski, R.M. (1990). Impression management: A literature review and two-component model. *Psychological Bulletin*, 107(1), 34–47.
+- Levashina, J., & Campion, M.A. (2007). Measuring faking in the employment interview: Development and validation of an IM in Interviews Scale. *Journal of Applied Psychology*, 92(6), 1638–1656.
+- Cable, D.M., & Kay, V.S. (2012). Striving for self-verification during organizational entry. *Academy of Management Journal*, 55(2), 360–380.
+
+**What impression management is:**
+Goffman (1959) defines impression management as the ongoing process by which individuals regulate the information others receive about them. In employment interview research, IM has historically been treated as a validity threat: candidates inflate or falsify their responses to appear more competent than they are (Levashina & Campion, 2007). The resulting research strand attempts to *detect and discount* IM from interview scores.
+
+**Why scoring IM is a category error in AscendX:**
+
+| Problem | Explanation |
+|---|---|
+| **No criterion validity at transcript level** | Whether a candidate is inflating vs. accurately representing their experience cannot be determined from the transcript alone — ground truth (actual past behaviour) is unavailable at the point of analysis |
+| **AI cannot distinguish authentic from inflated self-presentation** | Both produce specific behavioural language and positive framing — the surface features are identical |
+| **Penalising apparent IM reverses the coaching goal** | If the system scores IM negatively, it trains candidates to under-represent their genuine strengths — the opposite of effective interview preparation |
+| **Single-session inference is unstable** | IM research requires repeated observation or multi-method data; a single transcript provides neither |
+
+**The reframe — IM as a coaching competency:**
+The legitimate coaching question is not *"is this candidate exaggerating?"* but *"does this candidate know how to present their genuine experience credibly and specifically?"* Effective impression management in professional contexts is a communication skill, not a moral failure. The candidate who says "I led the project" when they facilitated one workstream is not lying — they are underusing their communication capacity.
+
+**How AscendX operationalises this correctly:**
+
+| Old approach (removed) | Correct replacement | Theoretical grounding |
+|---|---|---|
+| `impressionManagementScore` — flags overclaiming or deception | `professionalSelfVerificationSignals` — checks whether self-presentation aligns with verifiable CV evidence | Cable & Kay (2012): candidates who self-verify during entry (authentic self-presentation) show better long-term fit and retention than those who perform identity not their own |
+| Coaches candidates to suppress confident language | `hiringProfileAlignment` — coaches candidates to articulate genuine strengths in the language interviewers use | Levashina & Campion (2007): specific behavioural evidence is the signal interviewers use to evaluate competency — coaching its communication is legitimate preparation |
+
+**Coaching goal:** Reduce the gap between what the candidate *knows* and what they *can communicate* — not to manufacture impressions, but to help authentic capability become legible to an interviewer.
+
+**Research implication:** `professionalSelfVerificationSignals` operationalises Cable & Kay's (2012) finding that self-verification during organisational entry predicts longer-term fit and retention. This is a testable construct grounded in relational authenticity theory, not a deception detection model with no achievable criterion validity at the transcript level.
+
+---
+
 ### 5.1 PsyCap — Psychological Capital
 **Source:** Luthans, F., Youssef, C.M., & Avolio, B.J. (2007). *Psychological Capital: Developing the Human Competitive Edge.* Oxford University Press.
 
@@ -482,6 +522,9 @@ Transfer, not in-system performance, is the externally valid outcome measure. Al
 ### Feedback Literacy & Formative Assessment
 - Winstone, N.E., Nash, R.A., Parker, M., & Rowntree, J. (2017). Supporting learners' agentic engagement with feedback. *Educational Psychologist*, 52(1), 17–37.
 - Levashina, J., & Campion, M.A. (2007). Measuring faking in the employment interview. *Journal of Applied Psychology*, 92(6), 1638–1656.
+- Cable, D.M., & Kay, V.S. (2012). Striving for self-verification during organizational entry. *Academy of Management Journal*, 55(2), 360–380.
+- Leary, M.R., & Kowalski, R.M. (1990). Impression management: A literature review and two-component model. *Psychological Bulletin*, 107(1), 34–47.
+- Goffman, E. (1959). *The Presentation of Self in Everyday Life.* Doubleday.
 
 ### Psychometrics & Assessment Standards
 - Standards for Educational and Psychological Testing (2014). AERA/APA/NCME.

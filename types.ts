@@ -341,13 +341,13 @@ export interface DetailedFeedback {
     evidenceSpecificity: number;
     roleClarity: number;
     jdAlignment: number;
-    communicationClarity: number;
+    confidence: number;
     justifications: {
       starCompletion: string;
       evidenceSpecificity: string;
       roleClarity: string;
       jdAlignment: string;
-      communicationClarity: string;
+      confidence: string;
     }
   };
 
@@ -432,6 +432,24 @@ export interface DetailedFeedback {
   };
 
   // ── CANDIDATE-FACING IMPROVEMENT TARGETS ─────────────────────────
+  cvMissedOpportunities?: Array<{
+    cvItem: string;          // the specific CV entry that was relevant but not deployed
+    questionContext: string; // the question/moment where it applied
+    whyItFits: string;       // why this CV item was the right evidence (formal, warm, 2–3 sentences)
+    exampleUsage: string;    // complete ready-to-use sentence showing how to deploy it
+  }> | null;
+
+  transcriptAnnotations?: Array<{
+    moment: string;          // attribution + verbatim phrase: "When describing X, you said: '[phrase]'"
+    observation: string;     // what the phrase reveals — positive first, then what remains (2–3 sentences)
+    standardVersion: string; // complete interview-standard rewrite in the candidate's voice
+    principle: string;       // one plain-English sentence naming the underlying principle
+  }> | null;
+
+  amoPerformanceContext?: string | null;  // session-level AMO note — plain English, candidate-facing (Appelbaum et al., 2000)
+  feedbackApproachLevel?: 'Emerging' | 'Developing' | 'Established' | 'Advanced' | null;  // CDL level that drove the feedback approach (Nicol & Macfarlane-Dick 2006)
+  intentionAssessment?: string | null;  // did the session meet the student's pre-session learning goal? (goal-setting theory; SDT autonomy)
+
   verbalImprovementPlan?: {
     fillerPatterns: string;
     pacingAssessment: string;
@@ -489,10 +507,10 @@ export interface ProbeAnalysis {
   weakest_star_component: keyof StarStatus | null;
   contextual_anchor: string;
   suggested_next_probe_type: 'CLARIFYING' | 'CONCRETE' | 'DEEPENING' | 'STRATEGIC' | null;
-  sdt_signals: {
-    autonomy_language: 'present' | 'absent';
-    competence_language: 'present' | 'absent';
-    relatedness_language: 'present' | 'absent';
+  behavioural_evidence_signals: {
+    ownership_language: 'present' | 'absent';   // personal agency — "I decided / I chose"
+    skill_language: 'present' | 'absent';        // specific skill execution — named outputs
+    impact_language: 'present' | 'absent';       // impact on others — named people / team effects
   };
   scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent';
   interpretation: string;
@@ -511,11 +529,15 @@ export interface ProbeAnalysis {
     relatedness: number;
     lowest_vector: 'autonomy' | 'competence' | 'relatedness';
   };
-  goffman_scores: {
-    front_stage: number;
-    back_stage: number;
+  presentation_authenticity: {
+    front_stage: number;  // polished/curated language — staying close to CV (Cable & Kay 2012)
+    back_stage: number;   // personal/genuine — going beyond what was prepared; high = self-verifying
   };
   chc_signals: {
+    // gc → Kolb AC (Abstract Conceptualisation): domain knowledge depth
+    // gf → Kolb AE (Active Experimentation): adaptive reasoning under probing
+    // gq → Kolb CE (Concrete Experience): result specificity and measurable outcomes
+    // Field names kept stable for QuestionReport.tsx compatibility
     gc: 'strong' | 'moderate' | 'weak';
     gf: 'strong' | 'moderate' | 'weak';
     gq: 'strong' | 'moderate' | 'weak';
@@ -559,6 +581,7 @@ export interface QuestionSummaryReport {
   forwardOrientation?: string;             // Component 5: Career Adaptability + PsyCap Hope
   cvAlignmentNote?: string;               // CV cross-reference: what their background reveals about their answer
   breakContextGap?: string | null;        // forward orientation from this question — seeded into next session break state
+  amoContextNote?: string | null;         // AMO context — plain English note when conditions affected performance (Appelbaum et al., 2000)
 
   // Per-question Kolb ELC stage trace — shown to candidate immediately after each question
   elcStages?: {
@@ -581,40 +604,6 @@ export interface QuestionDataAccumulator {
   };
 }
 
-export interface Step0Signals {
-  sdt_merit_vectors: {
-    autonomy: number;
-    competence: number;
-    relatedness: number;
-    lowest_merit_vector: 'autonomy' | 'competence' | 'relatedness';
-  };
-  goffman_impression_management: {
-    front_stage_score: number;
-    back_stage_score: number;
-  };
-  algorithmic_aversion: {
-    aversion_detected: boolean;
-    aversion_evidence: string | null;
-  };
-  highhouse_social_identity: {
-    activated: boolean;
-    value_expression_score: number | null;
-    social_recognition_score: number | null;
-    dominant_motivation: 'value_expression' | 'social_recognition' | null;
-  };
-  chc_cognitive_first_pass: {
-    gc_signal: 'strong' | 'moderate' | 'weak';
-    gf_signal: 'strong' | 'moderate' | 'weak';
-    gq_signal: 'strong' | 'moderate' | 'weak';
-    lowest_chc_signal: 'gc' | 'gf' | 'gq';
-  };
-  scaffold_dependency_first_pass: {
-    phase1_quality: number | null;
-    phase3_quality: number | null;
-    scaffold_dependency_estimate: 'high' | 'moderate' | 'low' | 'insufficient_data';
-  };
-  psychological_safety_score: number;
-}
 
 export interface Requirement {
   id: string;

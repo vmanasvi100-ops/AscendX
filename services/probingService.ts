@@ -67,6 +67,59 @@ Your role is to generate a single, high-quality adaptive follow-up probe based o
 what the candidate just said.
 
 ═══════════════════════════════════════════════════════════════════
+THEORETICAL GROUNDING — WHY YOU PROBE AND HOW
+═══════════════════════════════════════════════════════════════════
+
+The probing pipeline is not interrogation. It is the REFLECTIVE OBSERVATION stage of
+Kolb's Experiential Learning Cycle (1984). The candidate's initial answer is Concrete
+Experience (CE). The probe activates Reflective Observation (RO) — a structured
+re-examination of that experience from a new angle. Without a probe, the ELC cycle
+cannot progress to Abstract Conceptualisation (AC) or Active Experimentation (AE).
+A session without probing produces practice without learning.
+
+KOLB ELC — HOW THE PROBE FITS:
+  CE (Concrete Experience):    The candidate's Act 1 answer — what they said unprompted.
+  RO (Reflective Observation): THIS PROBE — designed to make the candidate look at their
+                                experience differently. The probe angle should shift perspective,
+                                not simply ask for more of the same.
+  AC (Abstract Conceptualisation): What the candidate constructs from CE+RO together —
+                                   the per-question feedback and ELC trace will draw this out.
+  AE (Active Experimentation): The forwardOrientation field — what they will test next time.
+
+ZPD — ZONE OF PROXIMAL DEVELOPMENT (Vygotsky, 1978; Wood, Bruner & Ross, 1976):
+  The probe should target the GAP between the candidate's lower boundary (what they showed
+  unprompted) and their upper boundary (what they are capable of WITH structured support).
+  TOO EASY:  Probe asks for something they already demonstrated → no development value.
+  TOO HARD:  Probe demands reasoning beyond current upper boundary → produces anxiety, not insight.
+  CORRECT:   Probe targets the specific missing element that is just within reach with structure.
+  The zpd_note field in your output must name this gap explicitly for the coaching record.
+
+DELIBERATE PRACTICE (Ericsson, Krampe & Tesch-Römer, 1993):
+  Probes must be specific and targeted, not general. "Tell me more" is not a probe —
+  it is an invitation to repeat the same answer. Every probe must target a NAMED gap
+  (a missing STAR component, a vague claim, an unevidenced strength) and be precise
+  enough that a successful response would close that specific gap.
+
+PROFESSIONAL SELF-VERIFICATION (Cable & Kay, 2012):
+  The rationale field (required on every probe) should help the candidate understand
+  why this specific probe is being asked — NOT to expose frameworks, but because candidates
+  who understand the purpose of a question engage more authentically. The rationale is
+  Cable & Kay's self-verification mechanism operationalised: it invites genuine experience
+  rather than rehearsed performance.
+
+FEEDBACK LITERACY (Winstone, 2017):
+  The probe IS formative feedback in question form. For avoidant candidates, the rationale
+  must open with safety framing before the development point. For proactive candidates,
+  the rationale can be brief — they will engage regardless. Match rationale length to
+  feedbackOrientation from the adaptive profile.
+
+AMO (Appelbaum et al., 2000) — OPPORTUNITY CHECK:
+  Before generating a STRATEGIC or DEEPENING probe, check the candidate's anxiety level
+  and session phase. If anxiety is high AND phase is early, a challenging probe may create
+  an opportunity failure — the candidate cannot demonstrate their upper boundary because the
+  environment blocked it. Prefer CONCRETE or CLARIFYING probes under these conditions.
+
+═══════════════════════════════════════════════════════════════════
 CORE PROBING PRINCIPLES — NEVER VIOLATE THESE
 ═══════════════════════════════════════════════════════════════════
 
@@ -107,37 +160,50 @@ CORE PROBING PRINCIPLES — NEVER VIOLATE THESE
    Never engage the off-topic content — redirect professionally.
 
  ═══════════════════════════════════════════════════════════════════
- SCAFFOLD MODULATION — Wood, Bruner & Ross (1976)
+ SCAFFOLD MODULATION — Wood, Bruner & Ross (1976); Vygotsky (1978); CLT Kalyuga (2007)
  ═══════════════════════════════════════════════════════════════════
 
-Scaffolding principle: match support level to the candidate's current independent
-performance boundary (Zone of Proximal Development lower boundary).
-Gradually withdraw support as competence increases within the session.
+Scaffolding principle (Wood, Bruner & Ross, 1976): match support level to the candidate's
+current independent performance — the ZPD lower boundary. Gradually withdraw support as
+competence increases. This is not a preference — it is the mechanism by which the ZPD closes.
+
+Cognitive Load Theory (Sweller, 1988; Kalyuga, 2007 Expertise Reversal Effect):
+  Too much scaffold for a capable candidate INCREASES extraneous load — it interferes with
+  their existing schemas. When mesoScaffoldReduced = true (cross-session scaffold dependency
+  reduced), phase thresholds advance by 1 — this is the Expertise Reversal Effect operationalised.
+  Scaffolding that helped earlier now actively hinders. Reduce it.
 
 PHASE 1 — Introductory Alignment (session_phase_index 0–${p1End}, difficulty: EASY)
-  Lower boundary: candidate is at baseline — maximum scaffold provided.
+  ZPD position: Candidate at lower boundary baseline — maximum scaffold provided.
+  CLT: Extraneous load reduction is the priority here. Remove all unnecessary cognitive pressure.
   → Use supportive, structured language with no ambiguity
   → Offer structural hints if answer was incomplete:
       'You described the situation well — what was your specific role in the action?'
-  → If answer was strong, acknowledge briefly before deepening
-  → NEVER increase cognitive pressure at this stage
-  → Rationale MUST be detailed and warm
+  → If answer was strong, acknowledge briefly before deepening (ZPD: do not push beyond upper boundary)
+  → NEVER increase cognitive pressure at this stage — anxiety is an opportunity failure (AMO)
+  → Rationale MUST be detailed and warm — Winstone (2017): avoidant candidates need safety before direction
+  → Kolb RO: probe should shift angle slightly, not ask for elaboration on the same point
 
 PHASE 2 — Core Competency (session_phase_index ${p2Start}–${p2End}, difficulty: MEDIUM)
-  Lower boundary rising — moderate scaffold, building independence.
-  → Reference candidate's language as always
-  → Probe the gap between claim and evidence directly
-  → Introduce mild abstraction: 'What would you do differently now?'
-  → Structural hints are reduced — candidate should be building structure independently
-  → Rationale present but briefer
+  ZPD position: Lower boundary rising — moderate scaffold, building independence.
+  CLT: Germane load is the priority — redirect cognitive effort toward evidence construction.
+  → Reference candidate's language as always (contextual continuity activates self-verification)
+  → Probe the gap between claim and evidence directly (ZPD: target the specific unlockable gap)
+  → Introduce mild abstraction: 'What would you do differently now?' (Kolb RO→AC bridge)
+  → Structural hints are reduced — candidate should be internalising structure independently
+  → Rationale present but briefer — candidate has demonstrated they can engage without reassurance
+  → If mesoScaffoldReduced = true: treat this phase as Phase 3 difficulty
 
 PHASE 3 — Strategic High-Stakes (session_phase_index ${p3Start}+, difficulty: HARD)
-  Lower boundary near upper — minimal scaffold, independent performance.
-  → Ask for systemic thinking: 'How would you scale this approach organisation-wide?'
-  → Challenge assumptions: 'What would a critic of that approach say?'
-  → Demand abstract reasoning: 'What does this experience reveal about how you lead?'
-  → No structural hints — candidate has been scaffolded to this point
-  → Rationale is brief — candidate should expect challenge now
+  ZPD position: Lower boundary near upper — minimal scaffold, independent performance.
+  CLT: Expertise Reversal — structural support now interferes. Remove it entirely.
+  Kolb RO: probe must force a perspective shift, not a deepening of what they already said.
+  → Ask for systemic thinking: 'How would you scale this approach organisation-wide?' (AC stage signal)
+  → Challenge assumptions: 'What would a critic of that approach say?' (Kolb RO at highest level)
+  → Demand abstract reasoning: 'What does this experience reveal about how you lead?' (AC→AE bridge)
+  → No structural hints — candidate has been scaffolded to this point and must now demonstrate independently
+  → Rationale is brief — candidate should expect challenge now (deliberate practice: push the boundary)
+  → zpd_note MUST record what the probe was designed to unlock and whether it succeeded
 
  ═══════════════════════════════════════════════════════════════════
  CRITICAL QUALITY RULES
@@ -251,84 +317,139 @@ export const analyzeProbeResponse = async (params: AnalyzeProbeResponseParams): 
 Analyse the candidate's response. This could be a STAR phase completion (silent) or a response to a probe.
 Return JSON only — no preamble, no markdown.
 
+═══════════════════════════════════════════════════════════════════
+THEORETICAL GROUNDING — APPLY THESE FRAMEWORKS TO YOUR ANALYSIS
+═══════════════════════════════════════════════════════════════════
+
+KOLB ELC (1984): This response is data for the Reflective Observation stage.
+  Your job is to assess whether the candidate's answer, combined with this probe, produces
+  usable evidence for the Abstract Conceptualisation stage in the question summary.
+  depth_delta measures whether RO deepened the CE data — 'same' means the RO failed.
+
+ZPD (Vygotsky 1978; Wood et al. 1976): scaffold_dependency_signal measures whether the
+  candidate needed scaffold to reach this performance level. 'relied_heavily' = large ZPD gap,
+  'independent' = lower boundary has risen to meet the upper boundary — the development goal.
+
+BEHAVIORAL EVIDENCE VECTORS (Levashina & Campion 2007; Ericsson 2016):
+  merit_vectors.autonomy:    personal agency / ownership language — "I decided", "I chose"
+  merit_vectors.competence:  specific skill execution — named tools, measurable outcomes
+  merit_vectors.relatedness: impact on others — named people, team/stakeholder effects
+  These are the three evidence quality dimensions that predict criterion validity in structured
+  interviews. lowest_vector drives the next probe type and the question summary coaching.
+
+PRESENTATION AUTHENTICITY (Cable & Kay 2012 — authentic self-verification):
+  goffman_scores.front_stage: polished, professionally curated language — staying close to CV
+  goffman_scores.back_stage:  personal, genuine, unguarded — going beyond what was prepared
+  This is NOT a deception detection score. High back_stage = candidate is self-verifying
+  (presenting genuine experience). High front_stage / low back_stage = impression managing
+  (performing rather than revealing). Goal: help authentic capability become legible.
+  NEVER expose these terms or scores to the candidate.
+
+COMPETENCY LEVELS (Campion et al. 1994 structured interview research):
+  Emerging:   Situation/Task only — no Action/Result evidence present
+  Developing: STAR partially present — Action or Result incomplete/unclear
+  Established: Full STAR with clear behavioural evidence and a describable result
+  Advanced:   Multi-layered, unprompted reflection, cross-contextual application
+  NEVER use these labels in candidate-facing text — behavioural description only.
+
+AMO FRAMEWORK (Appelbaum et al. 2000):
+  Before attributing weak performance to low ability, check all three conditions:
+  Ability:      Does transcript evidence show the candidate has the relevant skill at all?
+  Motivation:   Does their language show genuine engagement with this role and context?
+  Opportunity:  Did the format, question difficulty, or probe pressure create a barrier?
+  AMO contextualises performance — it never criticises the candidate for conditions outside their control.
+
+CLT SIGNALS (Sweller 1988; Kalyuga 2007):
+  sdt_signals tracks whether ownership/competence/impact language was PRESENT in this response.
+  These are behavioral evidence signals, not SDT motivational scores.
+  They feed into the next probe selection: absent language = target for the next probe.
+
+═══════════════════════════════════════════════════════════════════
+ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
+═══════════════════════════════════════════════════════════════════
+
 CANDIDATE CONTEXT:
 Target Role: ${params.targetRole} at ${params.companyName}
 Question: ${params.question}
 ${params.probe ? `Probe Asked: ${params.probe}\nProbe Type: ${params.probeType}\nProbe Rationale: ${params.probeRationale}` : 'Silent STAR Phase Analysis (No Probe)'}
 Candidate's Response: ${params.response}
 
-═══════════════════════════════════════════════════════════════════
-ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
-═══════════════════════════════════════════════════════════════════
+1. PROBE EFFECTIVENESS [Kolb RO — did the probe deepen the CE data?]
+   probe_successful: true if the candidate provided meaningful NEW content (not just elaboration of same point).
+   depth_delta: 'increased' | 'same' | 'decreased' — did RO produce richer evidence than CE alone?
+   evidence_added: one sentence describing what SPECIFICALLY is new — quote the candidate's language.
 
-1. PROBE EFFECTIVENESS
-   probe_successful: true if the candidate provided meaningful content.
-   depth_delta: 'increased' | 'same' | 'decreased' compared to previous context.
-   evidence_added: one sentence describing what new evidence appeared.
-
-2. STAR PROGRESSION
+2. STAR PROGRESSION [Campion et al. 1994 — structured interview STAR framework]
    Assess what parts of the STAR framework the candidate has covered so far.
    star_status: { situation, task, action, result } (complete | partial | missing | not_yet_required)
+   A Result is not 'not_yet_required' after Phase 1. By Phase 2, all four components should be present.
 
-3. OWNERSHIP LANGUAGE DENSITY (0-100)
-   Score the density of ownership and agency language in this response only.
-   autonomy: Degree of personal initiative and ownership language ("I decided", "I drove", "I took responsibility").
-   competence: Degree of specific skill execution language ("I built", "I designed", "I resolved").
-   relatedness: Degree of collaborative impact language ("the team achieved", "I enabled", "stakeholders responded").
+3. OWNERSHIP LANGUAGE DENSITY [Behavioral Evidence Vectors — Levashina & Campion 2007; Ericsson 2016]
+   Score the density of behavioral evidence language in this response only (0–100 each).
+   autonomy:   "I decided / I drove / I took responsibility" — personal agency and initiative
+   competence: "I built / I designed / I resolved" — specific skill execution with named outputs
+   relatedness:"the team achieved / I enabled / stakeholders responded" — impact on others
    These are internal coaching signals — never expose the labels or scores to the candidate.
+   lowest_vector drives which probe type to use next and which coaching dimension to prioritise.
 
-4. PRESENTATION AUTHENTICITY SIGNAL (0-100)
-   front_stage: Degree of polished, professional self-presentation — carefully curated, ideal-self language.
-   back_stage: Degree of authentic, genuine experience — personal, unguarded, specific to them.
-   Balance matters: high front_stage with low back_stage = over-prepared or insincere impression.
+4. PRESENTATION AUTHENTICITY SIGNAL [Cable & Kay 2012 — authentic self-verification, NOT deception detection]
+   front_stage: Degree of polished, professionally curated self-presentation (0–100).
+   back_stage:  Degree of authentic, personal, unguarded experience beyond what was prepared (0–100).
+   Interpretation: high front_stage + low back_stage = impression-managing; high back_stage = self-verifying.
    Internal signal only — never describe as "Goffman" or "impression management" to the candidate.
+   This feeds professionalSelfVerificationSignals in the final session feedback.
 
-5. RESPONSE QUALITY SIGNALS
-   domain_language: 'strong' | 'moderate' | 'weak' — use of specific, accurate professional vocabulary.
-   adaptive_reasoning: 'strong' | 'moderate' | 'weak' — logical flow and problem-solving quality.
-   evidence_specificity: 'strong' | 'moderate' | 'weak' — use of concrete data, metrics, or named outcomes.
-   lowest_signal: 'domain_language' | 'adaptive_reasoning' | 'evidence_specificity'
-   Map to output fields: gc → domain_language, gf → adaptive_reasoning, gq → evidence_specificity.
+5. RESPONSE QUALITY SIGNALS [Kolb ELC stage completion signals — AC/AE/CE quality indicators]
+   domain_language:    'strong' | 'moderate' | 'weak' — maps to Kolb AC (domain knowledge applied)
+   adaptive_reasoning: 'strong' | 'moderate' | 'weak' — maps to Kolb AE (adaptive reasoning under probing)
+   evidence_specificity:'strong' | 'moderate' | 'weak' — maps to Kolb CE (measurable, specific outcomes)
+   lowest_signal: the weakest of the three — feeds the KOLB ELC STAGE COACHING in the question summary.
+   Schema fields gc/gf/gq: gc → domain_language (AC), gf → adaptive_reasoning (AE), gq → evidence_specificity (CE).
 
-6. AUTHENTICITY OBSERVATIONS
-   pj_observations: Max 2 plain English observations. Must reference specific candidate quotes.
-   Describe what you observed directly — no theoretical language.
+6. AUTHENTICITY OBSERVATIONS [Cable & Kay 2012 + Winstone 2017 feedback literacy]
+   pj_observations: Max 2 plain English coaching observations. Must quote the candidate's exact language.
+   Purpose: these feed the per-question coaching delivered immediately after this response.
+   No theoretical language. Describe what you observed directly.
    Examples: 'You stayed very close to your CV language here — the real story is often richer.'
              "'I want to make an impact' — what kind specifically, and why does that matter to you personally?"
 
-7. SCAFFOLD & NOVELTY
+7. SCAFFOLD & NOVELTY [ZPD — Vygotsky 1978; Deliberate Practice — Ericsson 1993]
    scaffold_dependency_signal: 'relied_heavily' | 'used_moderately' | 'independent'
-   novel_claim_introduced: true if new language/claims appeared.
+     relied_heavily = candidate needed explicit structural hints to produce this content (ZPD gap is large)
+     independent    = candidate produced equivalent content unprompted (lower boundary has risen)
+   novel_claim_introduced: true if the response contained a claim, example, or language NOT present before.
+     Novel claims indicate Kolb AE is functioning — the candidate is generating new approaches.
 
-8. DECISION
-   proceed: true if they should move on, false if they need more probing.
+8. DECISION [ZPD — probe only if gap remains]
+   proceed: true if they should move on, false if the ZPD gap has not yet closed enough to justify moving on.
+   Proceed = true when: STAR is at least Established, depth_delta was 'increased', and ZPD gap is small.
 
-9. COACHING RECOMMENDATION (Real-time Support)
-   coaching_guidance: A structured object containing:
-     - framework_gap: Name the STAR component or evidence type that needs work (e.g., "Missing Result", "Weak ownership language").
-     - instruction: Detailed, actionable instruction on how to rephrase or expand.
-     - example_phrase: A "Try saying..." template tailored to the candidate's specific words.
-     - priority: 'high' | 'medium' | 'low'.
-   coaching_tip: A single-sentence summary of the instruction.
-   CRITICAL: ALWAYS use layman's terms. Never mention psychological theories, scores, or framework names.
+9. COACHING RECOMMENDATION [Deliberate Practice (Ericsson 1993) + Nicol & Macfarlane-Dick Principle 6]
+   coaching_guidance:
+     framework_gap:  Name the EXACT STAR component or evidence type missing (e.g., "Missing Result", "No ownership language in Action section").
+     instruction:    Specific, bounded instruction — what exactly to say differently. Reference their words.
+     example_phrase: "Try saying..." — built from their actual language, not a template.
+     priority:       'high' | 'medium' | 'low' — high only if this gap would cost them the role.
+   coaching_tip: One sentence. The single most important change right now.
+   CRITICAL: Plain English only. Never mention theories, framework names, or scores to the candidate.
 
-10. COMPETENCY DEMONSTRATION LEVEL
-    Assign ONE level based on the full evidence in this response:
-    'Emerging': Situation/Task referenced but Action/Result missing or too vague to assess.
+10. COMPETENCY DEMONSTRATION LEVEL [Campion et al. 1994; Levashina & Campion 2007]
+    ONE level only — based on cumulative evidence in this response:
+    'Emerging':   Situation/Task referenced but Action/Result missing or too vague to assess.
     'Developing': STAR partially complete; some behavioural evidence but outcome unclear or unspecified.
     'Established': Full STAR with clear behavioural evidence and a describable/measurable result.
-    'Advanced': Unprompted multi-layered evidence, cross-contextual application, spontaneous reflection.
-    competency_demonstration_descriptor: 2 sentences max. What specifically did they demonstrate?
-    Use their own words where possible. Behavioural language only — no labels, no scores.
+    'Advanced':   Unprompted multi-layered evidence, cross-contextual application, spontaneous reflection.
+    competency_demonstration_descriptor: 2 sentences max. Quote specific candidate language.
+    Behavioural description only — no level labels, no scores visible in this field.
 
-11. AMO READINESS SIGNAL
-    Assess the three conditions required for performance (Ability × Motivation × Opportunity):
-    ability: 'high' | 'moderate' | 'low' — does evidence show the candidate has the skill?
-    motivation: 'high' | 'moderate' | 'low' — does language show genuine interest in this role/context?
-    opportunity: 'high' | 'moderate' | 'low' — did the response flow easily, or did hesitation/clarification suggest conditions blocked performance?
-    amo_note: 1 sentence. If any dimension is 'low', name why — this contextualises weak performance without blaming the candidate.
+11. AMO READINESS SIGNAL [Appelbaum et al. 2000 — contextualise performance before attributing gaps]
+    ability:     'high' | 'moderate' | 'low' — transcript evidence of the specific skill required
+    motivation:  'high' | 'moderate' | 'low' — genuine role engagement vs. performative language
+    opportunity: 'high' | 'moderate' | 'low' — did hesitation, clarification, or probe pressure suggest
+                 the environment blocked performance rather than the candidate lacking ability?
+    amo_note:    1 sentence. If any dimension is 'low', name the specific cause without criticising.
     Internal coaching signal only — never expose AMO labels to the candidate.
-   Return JSON only — no preamble, no markdown. `
+   Return JSON only — no preamble, no markdown.`
         }]
       }
     ],
@@ -353,14 +474,14 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
           weakest_star_component: { type: Type.STRING, nullable: true },
           contextual_anchor: { type: Type.STRING },
           suggested_next_probe_type: { type: Type.STRING, nullable: true },
-          sdt_signals: {
+          behavioural_evidence_signals: {
             type: Type.OBJECT,
             properties: {
-              autonomy_language: { type: Type.STRING, enum: ['present', 'absent'] },
-              competence_language: { type: Type.STRING, enum: ['present', 'absent'] },
-              relatedness_language: { type: Type.STRING, enum: ['present', 'absent'] }
+              ownership_language: { type: Type.STRING, enum: ['present', 'absent'] },
+              skill_language: { type: Type.STRING, enum: ['present', 'absent'] },
+              impact_language: { type: Type.STRING, enum: ['present', 'absent'] }
             },
-            required: ["autonomy_language", "competence_language", "relatedness_language"]
+            required: ["ownership_language", "skill_language", "impact_language"]
           },
           scaffold_dependency_signal: { type: Type.STRING, enum: ['relied_heavily', 'used_moderately', 'independent'] },
           interpretation: { type: Type.STRING },
@@ -389,7 +510,7 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
             },
             required: ["autonomy", "competence", "relatedness", "lowest_vector"]
           },
-          goffman_scores: {
+          presentation_authenticity: {
             type: Type.OBJECT,
             properties: {
               front_stage: { type: Type.INTEGER },
@@ -436,9 +557,9 @@ ANALYSIS TASKS — RETURN THE FULL SIGNAL SET EVERY TIME
         },
         required: [
           "probe_successful", "depth_delta", "evidence_added", "star_status", "weakest_star_component",
-          "contextual_anchor", "suggested_next_probe_type", "sdt_signals", "scaffold_dependency_signal",
+          "contextual_anchor", "suggested_next_probe_type", "behavioural_evidence_signals", "scaffold_dependency_signal",
           "interpretation", "pj_observations", "novel_claim_introduced", "proceed", "reason", "coaching_tip",
-          "merit_vectors", "goffman_scores", "chc_signals", "algorithmic_aversion",
+          "merit_vectors", "presentation_authenticity", "chc_signals", "algorithmic_aversion",
           "competency_demonstration_level", "competency_demonstration_descriptor", "amo_readiness"
         ]
       }
@@ -583,6 +704,21 @@ Write 2-3 sentences. Reference specific CV details by name where possible. Be di
 If their answer was well-aligned with their background, confirm that — it is useful feedback too.
 Output field: cvAlignmentNote` : ''}
 
+AMO PERFORMANCE CONTEXT (Appelbaum et al., 2000 — candidate-facing, plain English)
+Review the amo_readiness signals in the DATA SIGNALS (Probe Analyses) above.
+IF any dimension (ability, motivation, opportunity) is 'low':
+  Generate a single sentence for the amoContextNote field — plain English, no framework labels.
+  Purpose: contextualise why performance may have been affected by conditions, not only capability.
+  Frame it as information, not excuse. Never expose the labels 'AMO', 'ability', 'motivation', 'opportunity'.
+  Example when opportunity is low: "Follow-up questions in this session were more demanding than usual —
+    performance under pressure like this often looks different from your baseline capability."
+  Example when motivation is low: "Your answers were strongest when describing experiences you clearly
+    cared about — connecting the role more directly to what motivates you will unlock more of that energy."
+  Example when ability is low: "The evidence in this answer was still developing — that is exactly what
+    repeated practice is designed to build."
+IF all dimensions are 'high': return amoContextNote as null.
+Output field: amoContextNote (string | null)
+
 ELC STAGE LABELS (Kolb Experiential Learning Cycle — candidate-facing, plain English)
 Map this question's session to all four Kolb stages. One sentence each. No jargon.
 ce: What the candidate's main answer showed about their current level — their baseline for this question.
@@ -630,6 +766,7 @@ Return JSON only — no preamble, no markdown.`
             practiceTask: { type: Type.STRING },
             forwardOrientation: { type: Type.STRING },
             cvAlignmentNote: { type: Type.STRING, nullable: true },
+            amoContextNote: { type: Type.STRING, nullable: true },
             elcStages: {
               type: Type.OBJECT,
               properties: {
@@ -665,6 +802,7 @@ Return JSON only — no preamble, no markdown.`
       forwardOrientation: parsed.forwardOrientation,
       cvAlignmentNote: parsed.cvAlignmentNote ?? null,
       breakContextGap: parsed.forwardOrientation ?? null,
+      amoContextNote: parsed.amoContextNote ?? null,
       elcStages: parsed.elcStages ?? null,
     } as QuestionSummaryReport;
   } catch (err) {

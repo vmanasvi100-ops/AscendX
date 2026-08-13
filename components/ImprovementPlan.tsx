@@ -143,7 +143,7 @@ const ImprovementPlan: React.FC<Props> = ({ feedback }) => {
           summary={elc.experimentationTarget}
         >
           <p className="text-[10px] font-medium text-slate-500 mb-6">
-            Based on Kolb's Experiential Learning Cycle — each session completes four stages of learning.
+            Well Done!! Keep Learning, Keep Growing 
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[

@@ -18,6 +18,12 @@ export interface GenerateFeedbackParams {
   phaseProgression: string;
   candidateProfile?: { experience: string; feedbackLiteracy: string; seeksFeedback: string; regulatoryFocus: string; anxietyLevel: string } | null;
   mesoAccumulator?: Pick<MesoAccumulator, 'delta' | 'sessions'> | null;
+  sessionCDLProfile?: {
+    modalLevel: 'Emerging' | 'Developing' | 'Established' | 'Advanced' | null;
+    levelCounts: { Emerging: number; Developing: number; Established: number; Advanced: number };
+    totalQuestions: number;
+  } | null;
+  learningIntention?: string | null;
 }
 
 export const generateDetailedFeedback = async (
@@ -55,6 +61,149 @@ export const generateDetailedFeedback = async (
     return missing.map(c => `Session ${s.sessionId}: ${c} not reached`);
   }) ?? [];
 
+  // ── Learning Intention (null-safe — no intention → intentionAssessment returns null) ──
+  const learningIntentionInstruction = params.learningIntention?.trim()
+    ? `
+── intentionAssessment ─────────────────────────────────────────────
+The student set this learning goal before the session:
+"${params.learningIntention.trim()}"
+
+Assess whether this session moved them toward that goal. 2–3 sentences.
+Be specific: reference something they actually said that relates to the goal.
+If they achieved it: name the exact moment. If partially: name what progressed and what remains.
+If no evidence relates to the goal: acknowledge the gap without making them feel bad.
+NEVER use the words Emerging, Developing, Established, or Advanced.
+Frame as: what changed, what the next step is.
+[Goal-setting theory — Locke & Latham (1990); SDT autonomy — Ryan & Deci (2000)]
+`
+    : '';
+
+  // ── Level-Differentiated Feedback Framework (null-safe — no CDL data → no instruction injected) ──
+  const cdlProfile = params.sessionCDLProfile ?? null;
+  const modalCDL = cdlProfile?.modalLevel ?? null;
+
+  const levelFeedbackInstruction = modalCDL ? `
+═══════════════════════════════════════════════════════
+LEVEL-DIFFERENTIATED FEEDBACK FRAMEWORK — MANDATORY
+═══════════════════════════════════════════════════════
+Session modal competency level: ${modalCDL}
+Level distribution: Emerging=${cdlProfile!.levelCounts.Emerging} · Developing=${cdlProfile!.levelCounts.Developing} · Established=${cdlProfile!.levelCounts.Established} · Advanced=${cdlProfile!.levelCounts.Advanced}
+
+Apply the approach for ${modalCDL} across ALL Layer A output.
+This operationalises Nicol & Macfarlane-Dick (2006), Hattie & Timperley (2007), and Boud & Molloy (2013)
+differently based on where the candidate is — not a one-size-fits-all approach.
+Generic feedback is a failure condition. Level-differentiated feedback is the standard.
+
+${modalCDL === 'Emerging' ? `EMERGING APPROACH — Task Clarification (Nicol Principle 1 · Hattie: feed-up level)
+The candidate does not yet know what a complete behavioural response looks like.
+Your job: make the standard legible. NOT: critique current performance.
+
+TONE: Explicit, warm, instructive. Like a coach who sees genuine potential.
+NEVER open with what is missing. Open with what they did that shows intent.
+
+performanceSummary: Open with genuine effort or any structural attempt, however partial.
+  ONE sentence must name what a complete answer looks like — this IS the standard (Nicol P1).
+  Frame the session as the START of a learning process, not an assessment of current level.
+
+strengths: Find ANY evidence of genuine engagement — a specific detail, an attempt to structure.
+  Praise the attempt alongside the content. Celebrate the act of showing up and trying.
+
+weaknesses / actionableSuggestions: ONE primary development area only — the most fundamental gap.
+  Almost always: adding a specific named situation to their answer.
+  Provide a CONCRETE SENTENCE STEM to practise with:
+  "Try starting with: 'In my role as X at Y, I faced a situation where...'"
+  NEVER list more than two development areas at Emerging level. Overwhelm prevents action.
+
+careerDevelopment / nextSteps: Make them tiny and achievable. Build confidence, not to-do lists.
+
+elcLearningCycle: Acknowledge CE stage completed. Frame next session as helping them reach RO.
+  experimentationTarget = ONE micro-behaviour they can try in the next 24 hours.
+
+CONFIDENCE RULE: End performanceSummary with something genuinely encouraging.
+Confidence at Emerging level is fragile — protect and build it explicitly (PsyCap Luthans 2007).` : ''}${modalCDL === 'Developing' ? `DEVELOPING APPROACH — Personal Agency Focus (Hattie: feed-back level · Nicol Principle 3)
+The candidate has structure but dilutes their own contribution.
+Core gap: "We did X" instead of "I decided X." They have the experience — they need to own it.
+
+TONE: Affirming of progress, guided discovery. Questions that help them find the gap themselves.
+NEVER just say "be more specific" — name exactly what is missing and model the alternative.
+
+performanceSummary: Explicitly acknowledge structural progress made.
+  "You consistently provided context and described what happened" is worth saying.
+  Then name the one specific gap: personal ownership of their decisions and actions.
+
+strengths: Name specific moments where they nearly reached Established — build on those moments.
+  Affirm the STAR structure they demonstrated, however partially.
+
+weaknesses / actionableSuggestions: Focus on the action-attribution gap.
+  Model the rewrite explicitly using something they actually said:
+  "Instead of 'the team decided to', try 'I proposed that we' — the decision was yours, own it."
+  Give them a clear target: every Action sentence in the next practice starts with 'I'.
+
+elcLearningCycle: CE achieved, RO beginning. AC stage unlocks when they can name their own
+  specific contribution and WHY it mattered. experimentationTarget: restate one today answer
+  in first person — this is the single most important thing to practise.
+
+CONFIDENCE RULE: Frame development as a small shift from good to excellent.
+They are close — let them feel that proximity. Approach motivation builds from near-success.` : ''}${modalCDL === 'Established' ? `ESTABLISHED APPROACH — Reflection Layer Focus (Boud & Molloy 2013 · Nicol Principle 7)
+This candidate has mastered the basic structure. Next development is DEPTH, not more structure.
+Core gap: describing WHAT happened well, but not WHY it mattered or what they LEARNED.
+
+TONE: Dialogic, peer-level coaching. Like a mentor talking to someone genuinely capable.
+NEVER repeat the STAR framework back to them — they know it. Add depth, not structure.
+
+performanceSummary: Acknowledge mastery of structure explicitly.
+  Frame the session as demonstrating readiness for a deeper level of interview challenge.
+  Name the specific quality that distinguishes their best answer from the session.
+
+strengths: Name the specific competency demonstrated with precision — not "your answer was structured."
+  Name the actual insight: "Your stakeholder management answer showed you understand that
+  alignment before execution reduces rework — that is a senior-level observation."
+
+weaknesses / actionableSuggestions: Focus entirely on the AC/AE gap (Kolb 1984).
+  Pose a genuine reflective question about one of their answers:
+  "What principle did that experience teach you that you would apply again?"
+  Model what an Advanced version of their best answer from today would sound like.
+
+elcLearningCycle: CE + RO achieved. AC is the next stage to unlock.
+  experimentationTarget: a reflection question to sit with — not just a technique to practise.
+  Frame as deepening what they already have, not correcting what is missing.
+
+CONFIDENCE RULE: Precise recognition lands better than general encouragement at this level.
+Treat them as genuinely capable — this itself builds self-efficacy (PsyCap efficacy reinforcement).` : ''}${modalCDL === 'Advanced' ? `ADVANCED APPROACH — Metacognition and Transfer (Savickas 2012 · Ericsson 1993)
+This candidate is performing at the level of a competitive applicant.
+Your job: sharpen what is already strong. Position them as a professional, not a student.
+
+TONE: Peer-level. Read like advice from a senior colleague, not an examiner.
+NEVER suggest improving what is already working well. Focus only on what is still missing.
+DO NOT over-praise — precision is the compliment at this level.
+
+performanceSummary: Acknowledge quality directly and specifically.
+  Name what makes their answers distinguishable from the majority of candidates at this level.
+  One sentence on what competitive employers specifically screen for at senior/final-round stage.
+
+strengths: Position in terms of professional identity and career trajectory, not task completion.
+  "You demonstrated the kind of systems thinking that typically emerges after 3-4 years in
+  senior cross-functional roles" beats "your answer was well-structured."
+
+weaknesses / actionableSuggestions: Focus on transfer and breadth.
+  Which question domains (leadership, technical, collaborative, analytical) are less consistent?
+  Deliberate practice target: the single area that varies most across this session's questions.
+
+elcLearningCycle: At or near full cycle. AE stage — applying learning to genuinely new contexts.
+  experimentationTarget: deliberate practice at expert level, NOT STAR structure review.
+  Frame this as a professional development conversation, not an interview technique drill.
+
+CONFIDENCE RULE: Precise acknowledgement of specific excellence is more motivating than
+general praise for candidates at this level. Do not over-reassure.` : ''}
+
+ABSOLUTE RULES ACROSS ALL LEVELS:
+1. NEVER use the words Emerging, Developing, Established, or Advanced in any candidate-facing field.
+2. The approach changes by level. The warmth does not — maintain warmth at every level.
+3. Find something genuine to celebrate at every level — this is positive behaviour reinforcement.
+4. Confidence building = accurate recognition of real progress, not flattery.
+5. Output feedbackApproachLevel = "${modalCDL}" in the schema.
+` : '';
+
   // ==========================================
   // LAYER A & B: TRIGGER FINAL FEEDBACK GEN
   // ==========================================
@@ -67,6 +216,23 @@ export const generateDetailedFeedback = async (
           text: `
 You are an expert Interview Auditor and Occupational Psychologist.
 Generate a structured performance report from the data below.
+
+THEORETICAL FRAMEWORK (apply deliberately — generic output is a failure condition)
+• Kolb ELC (1984) CE→RO→AC→AE: elcLearningCycle MUST populate all 4 stages. Gibbs (1988) maps to: selfAssessmentPrompt(CE)→calibrationNote(RO)→competencyDemonstration(AC)→developmentPoints(conclusion)→forwardOrientation(AE).
+• Campion CDL (1994): Emerging=S/T only | Developing=partial STAR | Established=full STAR+result | Advanced=multi-layer+reflection. NEVER expose labels to candidate — use behavioural language only.
+• Levashina & Campion (2007) meritVectors: personalAgency("I decided/chose") | skillSpecificity(numbers/tools/timelines) | impactArticulation(named people/outcomes). lowestVector drives primary suggestion.
+• AMO (Appelbaum 2000): Weak performance ≠ low ability. Check Ability/Motivation/Opportunity before attributing any gap.
+• ZPD (Vygotsky 1978): lower boundary=Act 1 unprobed; upper=with probing. scaffoldDependency measures the gap.
+• Hattie & Timperley (2007): Task level (session 1) | Process level (sessions 2–3) | Self-regulation (session 4+).
+• Nicol & Macfarlane-Dick (2006): P1=state the standard explicitly | P3=high-quality specific info | P5=protect efficacy | P6=close the gap.
+• Boud & Molloy (2013): selfAssessmentPrompt MUST activate metacognition BEFORE coaching reveals.
+• PsyCap (Luthans 2007): Never attribute weakness to stable deficits. Frame every gap as learnable. Protect efficacy throughout.
+• Ericsson (1993): Every actionable suggestion = specific, bounded, immediately practicable drill. Not vague encouragement.
+• Cable & Kay (2012): professionalSelfVerificationSignals — self_verifying(genuine/personal) vs impression_managing(CV-close/performed).
+• Savickas (2012): forwardOrientation targets ONLY next adaptability stage: concern→control→curiosity→confidence.
+• Higgins (1997) regulatory focus: prevention-focus→frame as gap-protection; promotion-focus→frame as strength-building.
+• NCS (2025) STAR weights: S=15%, T=15%, A=60%, R=10%. Action is the primary competency evidence source.
+
 
 ═══════════════════════════════════════════════════════
 CRITICAL — TWO-LAYER OUTPUT ARCHITECTURE
@@ -126,48 +292,107 @@ Specifically:
   psychology frameworks — treat it as a structured reflection
   tool, not a final verdict.'
 
+${levelFeedbackInstruction}
+═══════════════════════════════════════════════════════
+MANDATORY TONE STANDARD — ENFORCED ACROSS EVERY FIELD
+═══════════════════════════════════════════════════════
+Every sentence you write must satisfy all four strands simultaneously.
+These are not stylistic preferences — they are quality criteria.
+Feedback that fails them is feedback that will not be acted on.
+
+FORMAL: Professional, academic register throughout. No colloquialisms.
+  ✗ "Your answer was a bit all over the place"
+  ✓ "Your response would benefit from a clearer structural sequence across all four STAR components"
+
+POLITE: Every observation is a constructive invitation, never fault-finding.
+  ✗ "You forgot to mention the result"
+  ✓ "To complete this response fully, a brief statement of the outcome and its measurable impact would strengthen the evidence considerably"
+
+WARM: Acknowledge the human behind the answer. Recognise effort, genuine engagement, and courage to practise.
+  ✗ "The answer was unclear"
+  ✓ "You engaged with this question with real thought — with one further structural step, that engagement becomes compelling evidence"
+
+REINFORCING: Every development area MUST close with one sentence anchored to specific evidence from their answer
+  that proves the capability exists — it simply needs to become more visible in the interview format.
+  The candidate must always leave each development point feeling closer, not further away.
+  NEVER end a weakness or gap observation without naming what they demonstrated that proves they CAN close it.
+
 ═══════════════════════════════════════════════════════
 LAYER A — CANDIDATE-FACING FEEDBACK
-Uses Step 0 signals. Written for the student — warm, clear, actionable.
+Uses Step 0 signals AND the Level-Differentiated Feedback Framework above.
+Written for the student — formal, polite, warm, and reinforcing in every sentence.
 ═══════════════════════════════════════════════════════════════════
 
 Using the Step 0 signals, generate the following Layer A components.
-Every component must be grounded in what this specific candidate said.
-Generic feedback is a failure condition.
+Every component must be grounded in what this specific candidate said — quote or closely paraphrase their words.
+Generic feedback is a failure condition. Feedback without transcript evidence is a failure condition.
 
 ── performanceSummary ──────────────────────────────────────────────
-3–4 sentences. Warm opening. Acknowledge what genuinely worked.
+[PsyCap Efficacy (Luthans 2007) — open with genuine strength to protect self-efficacy before development areas]
+[Boud & Molloy (2013) — sustainable feedback: candidate must feel capable of growth before receiving coaching]
+5–7 sentences. Formal, warm opening. Reference specific moments from the transcript.
+Sentence 1: Name the most impressive thing they demonstrated — cite the actual moment or phrase.
+Sentence 2: Name what this demonstrates about their capability — frame it as an interviewer would recognise it.
+Sentence 3: Acknowledge the effort and structure they brought to the session as a whole.
+Sentence 4–5: Introduce the primary development area — NOT as a failure, but as the next precision step.
+  Name the specific phrase or moment where this gap appeared (quote or close paraphrase).
+  Explain why closing this gap is the highest-leverage move for this candidate.
+Sentence 6–7: Close with genuine encouragement grounded in their strongest specific moment.
 IF algorithmicAversion.detected = true:
   MUST follow with: 'I want to acknowledge upfront that AI feedback has real
   limitations — it cannot replicate the nuance of a human interviewer.
   What follows is based on the specific evidence in your answers today.'
   
 ── overallStarSynthesis ──────────────────────────────────────────────
+[Hattie & Timperley (2007) Task-level; Gibbs Stage 1 (Description); Campion et al. (1994) structured interview]
 5–6 sentences. A session-wide aggregate analysis of STAR performance.
 1. Evaluate STAR completion and evidence quality for each question individually from the transcript.
 2. Synthesize these into a global "session-wide synthetic average".
 3. Explain this average to the candidate (e.g., "Across all 5 questions, your Action sections were consistently the strongest, whereas Situation descriptions tended to be overly brief, averaging a lower detail score").
 4. Acknowledge consistency or variance across different question types.
 5. Use warm, coaching-centric language.
-IF impressionManagementScore.frontStageScore > 75:
+[Cable & Kay (2012) Authentic self-verification — use professionalSelfVerificationSignals from Step 0, NOT impression management scoring]
+IF professionalSelfVerificationSignals.dominantMode = 'impression_managing':
   Include one sentence inviting authentic disclosure:
   'Your answers were well-structured — there is also space to let the specific
    detail of your experience show through more directly.'
-IF impressionManagementScore.backStageScore > 75:
+IF professionalSelfVerificationSignals.dominantMode = 'self_verifying' AND any STAR component is partial or missing:
   Include one sentence helping structure authentic content:
   'You shared genuine experience — the next step is giving that experience
    a clearer structure so the interviewer can follow your contribution easily.'
 
 ── weaknesses ───────────────────────────────────────────────────────
-2–3 specific areas where the candidate could have provided more evidence or depth.
-Format: [Area]: [Specific missing evidence or advice]
+[Nicol & Macfarlane-Dick Principle 6 (2006) — close the gap; AMO check: is gap due to ability, motivation, or opportunity?]
+[Hattie & Timperley: development areas must reference specific observable behaviour, not character]
+2–3 specific development areas. Each entry MUST follow this four-part structure:
+
+Part 1 — WHAT THEY SAID: Quote or closely paraphrase the specific phrase or moment where the gap appeared.
+  E.g. "When you described the team project, you said 'we all worked together to deliver it' — "
+Part 2 — OBSERVATION: Name what the phrase reveals and what is missing, using formal + warm language.
+  E.g. "— this captures the collaborative spirit of the experience well, and the interviewer will be
+  looking for the specific contribution you personally made to that collective outcome."
+Part 3 — INTERVIEW-STANDARD VERSION: Write the complete rewritten sentence in the candidate's voice.
+  This must be a ready-to-use phrase they could say verbatim in a real interview.
+  E.g. "A stronger version of this moment would be: 'I took responsibility for coordinating the weekly
+  check-ins — without that structure, I felt the team's timelines would have slipped.'"
+Part 4 — REINFORCING CLOSE: Name the specific evidence from their answer that proves they CAN close this gap.
+  E.g. "Your instinct to acknowledge the team alongside your own contribution is already there —
+  the precision of ownership is the single step that remains."
 
 ── strengths ───────────────────────────────────────────────────────
-2–3 specific, evidence-based strengths from this session.
-Each must reference something the candidate actually said.
-Format: [Strength label]: [Specific evidence from transcript]
-Example: 'Concrete results: You quantified your outcome with a specific figure
-  and timeframe — this is exactly what competitive interviewers look for.'
+[PsyCap Efficacy (Luthans 2007) — mastery experience: naming specific evidence of success builds self-efficacy]
+[Nicol & Macfarlane-Dick Principle 1 (2006) — clarify what good performance IS, not only what it is not]
+2–3 specific, evidence-based strengths. Each entry MUST follow this three-part structure:
+
+Part 1 — LABEL AND SPECIFIC PHRASE: Name the strength and quote or closely paraphrase the exact moment.
+  E.g. "Personal ownership and decision-making: When you said 'I decided to restructure the entire
+  project timeline after identifying the bottleneck' — "
+Part 2 — WHAT IT SIGNALS TO AN INTERVIEWER: Explain why this specific phrasing is strong in interview terms.
+  E.g. "— this is precisely the language that signals personal agency to a hiring manager. The word
+  'I decided' followed by a specific action demonstrates initiative and accountability in one phrase."
+Part 3 — REINFORCING CLOSE: Name how this strength can be extended or applied further.
+  E.g. "Carrying this level of ownership language consistently across all your Action sections will
+  distinguish your answers from the majority of candidates at this level."
 
 ── actionableSuggestions ─────────────────────────────
 ${blendedFramingInstruction}
@@ -179,34 +404,45 @@ PRIORITY ORDER for which suggestion leads:
   2. If lowestSignal from chcCognitiveDimensions indicates a weak Kolb ELC stage → ELC stage coaching leads
   3. Keyword coverage gap from JD
 
-BEHAVIORAL EVIDENCE TRANSLATIONS (use these exact framings — no theoretical labels visible to candidate):
-  Autonomy weak: 'Use more "I decided" and "I chose" language. Interviewers are
-    assessing your judgment — they need to hear your specific decisions, not just
-    what the team did or what happened. Own your choices explicitly.'
-  Competence weak: 'Your answers need more specific evidence of skill. Numbers,
-    timelines, and named tools are more convincing than general descriptions.
-    What specifically did you do, and what was the measurable result?'
-  Relatedness weak: 'Show more awareness of how your work affected others.
-    Interviewers at this level assess not just what you achieved but how you
-    brought people with you. Name the people, describe the impact on them.'
+Each suggestion MUST follow this four-part structure — no exceptions:
 
-KOLB ELC STAGE COACHING TRANSLATIONS (plain English — framed as learning cycle stage signals, no CHC labels):
-  Gc weak: 'Bring in more specific knowledge about the sector and role.
-    One or two precise examples from your reading or experience will signal
-    that you understand the world this organisation operates in.'
-  Gf weak: 'When a probe shifted the angle, your answer became less flexible.
-    Practise with unexpected follow-ups: What if that approach had not worked?
-    What would you do differently with hindsight? Flexibility impresses.'
-  Gq weak: 'Every STAR answer needs a Result with something measurable.
-    A number, a timeframe, a specific outcome. Even small and specific beats
-    large and vague every time.'
+Part 1 — THE MOMENT: Quote or closely paraphrase the specific phrase from the transcript this suggestion addresses.
+  "When describing your role in [situation], you said '[approximate verbatim]' — "
+Part 2 — THE INSIGHT: One sentence (formal, warm) on why this phrasing falls short of interview standard
+  and what closing this gap would unlock for the candidate.
+Part 3 — THE REWRITE: A complete, ready-to-use sentence in the candidate's voice that they could say verbatim.
+  Begin with: "A stronger version of this moment would be: '[rewritten sentence]'"
+Part 4 — REINFORCING RATIONALE: One sentence explaining the principle, ending with acknowledgement of capability.
+  Must end with something genuine the candidate demonstrated that proves they can apply this immediately.
 
-Each suggestion must include a rationale (max 2 sentences, plain English).
+BEHAVIORAL EVIDENCE TRANSLATIONS — ground these in specific transcript moments:
+  Autonomy weak: Root the suggestion in a specific "we" or passive phrase they used. Rewrite it as an "I decided/chose/initiated" sentence.
+  Competence weak: Root the suggestion in a specific description they gave that lacked numbers, timelines, or named tools. Provide the measurement.
+  Relatedness weak: Root the suggestion in a moment where they described an outcome without naming its effect on others. Add the people and the impact.
+
+KOLB ELC STAGE COACHING TRANSLATIONS:
+  Gc weak: Root in a specific moment of vague domain language. Provide the sector-specific version.
+  Gf weak: Root in a specific moment where the candidate repeated their initial response rather than adapting. Provide the adaptive alternative.
+  Gq weak: Root in a specific Result statement that lacked measurement. Provide a measurable version.
+
+Formal, polite, warm, reinforcing tone in every part of every suggestion.
 
 ── starAnalysis ────────────────────────────────────────────────────
 Per-component assessment for each answer given.
+
+STAR PHASE WEIGHTS (National Careers Service, 2025 — evidence-based distribution):
+  Situation: 15% — context-setting; important but not the primary evidence source
+  Task:      15% — clarifies candidate responsibility and scope of the challenge
+  Action:    60% — PRIMARY COMPONENT: competency evidence lives here; interviewers assess decisions, skill, and agency
+  Result:    10% — outcome and impact; frequently underdeveloped in graduate and student interviews
+
+COACHING PRIORITY RULE: When any STAR phase is weak, address Action first.
+A strong Action section carries a session even when other phases are partial.
+A weak Action section cannot be rescued by a perfect Situation and Result.
+Frame your starAnalysis coaching to reflect this hierarchy — Action gets the most coaching depth.
+
 Situation, Task, Action, Result — each rated: strong / partial / missing.
-If missing: one sentence on how to complete it. Warm, specific.
+If missing: one sentence on how to complete it. Warm, specific. Action: give 2 sentences of coaching depth.
 
 ── keywordCoverage ─────────────────────────────────────────────────
 Cross-reference candidate's answers against the uploaded JD.
@@ -214,6 +450,8 @@ List: keywords present (with example usage), keywords missing (with one-line tip
 Language: 'You naturally used...' and 'It would strengthen your case to mention...'
 
 ── careerDevelopment ───────────────────────────────────────────────
+[Savickas Career Adaptability (2012) — 4Cs sequencing; SCCT (Lent et al., 1994) — build career self-efficacy]
+[Deliberate Practice (Ericsson 2016) — nextSteps must be specific, bounded, immediately actionable]
 ${adaptabilityInstruction}
 Object containing:
 - certifications: 2-3 specific certifications relevant to the role.
@@ -253,13 +491,44 @@ IF credibilityFlag.triggered = true:
 IF both cvAlignmentScore and jdAlignmentScore are null:
   Return empty string.
 
+── cvMissedOpportunities (Layer A — CV evidence the candidate possessed but did not deploy) ──
+ONLY generate when CV was provided. If no CV: return null.
+If CV provided and candidate drew on it well throughout: return empty array.
+
+PURPOSE: The candidate already has the right experience. This field shows them exactly WHERE
+in the session they had something stronger available — and how to use it next time.
+This is not a critique of what they said. It is an inventory of what they already have.
+
+For each missed opportunity, provide:
+{
+  cvItem: string,          // The specific CV item — role, project, achievement, quantified result.
+                            // Quote from the CV directly where possible.
+                            // E.g. "Your CV notes that you 'managed a team of 8 volunteers across three sites for 6 months'"
+  questionContext: string, // The question and moment where this CV evidence was directly relevant.
+                            // E.g. "When asked about your leadership experience, you described a general approach to teamwork —"
+  whyItFits: string,       // Why this CV item was the right evidence here. Formal, warm, specific.
+                            // Make the connection explicit: the interviewer who read the CV would expect this example to appear.
+                            // 2–3 sentences. End with acknowledgement that the experience is real and strong.
+  exampleUsage: string     // A complete, ready-to-use sentence showing how to open with this CV evidence.
+                            // Must be specific, named, immediately deployable.
+                            // Format: "In a future interview, this might sound like: 'During my time managing volunteers at [org], I...'"
+}
+
+TONE RULES — MANDATORY:
+1. Every entry must feel like a coaching gift, not a correction.
+2. Open each entry with what the candidate ALREADY HAS — the CV evidence is real and strong.
+3. Frame the gap as: "You had this — here is how to deploy it."
+4. NEVER suggest the candidate fabricated or lacked experience — they have it documented.
+5. Formal, polite, warm, reinforcing throughout.
+
 ── rubrics ─────────────────────────────────────────────────────────
-Score the following per answer. Scale 1–5. Brief justification each.
-  - STAR Completion (1–5)
-  - Evidence Specificity (1–5)
-  - Role Clarity (1–5)
-  - JD Alignment (1–5)
-  - Communication Clarity (1–5)
+Score 1–5 with a brief justification for each. Scale: 1=very weak, 3=adequate, 5=excellent.
+
+  - STAR Completion (1–5) [AVERAGED across applicable questions only. Score each question where a full behavioural STAR response was expected. Exclude motivational, clarification, or preference questions where STAR is not the expected format. Divide total by applicable question count. NCS weights applied per question: S=15%, T=15%, A=60%, R=10%. A session average of 4+ requires strong Action across most questions.]
+  - Evidence Specificity (1–5) [How consistently the candidate used numbers, named tools, timelines, and measurable outcomes]
+  - Role Clarity (1–5) [How clearly the candidate demonstrated understanding of what the role requires]
+  - JD Alignment (1–5) [How directly the candidate's answers addressed the job description requirements]
+  - Confidence (1–5) [Text-based proxy using KNN/SVR feature patterns validated at 94% and 85% accuracy respectively. Score from: filler word frequency ("um","uh","like","basically","you know"), hedging language ("I think","maybe","sort of","kind of","I suppose"), sentence completion rate, frequency of self-corrections, and answer depth relative to question complexity. 1=high filler+hedge density, frequent self-correction, incomplete answers; 5=decisive phrasing, minimal hedging, direct complete responses throughout.]
 
 ═══════════════════════════════════════════════════════════════════
 LAYER B
@@ -566,7 +835,26 @@ hiringProfileAlignment: {
   // Be direct. One sentence. This is the most important output of this section.
 }
 
+${learningIntentionInstruction}
+── amoPerformanceContext (Layer A — session-level AMO note, candidate-facing) ───────────────────
+[Appelbaum et al. (2000) AMO Framework — contextualise performance without blaming the candidate]
+Review ALL probe analyses in the session data. If ANY question had a 'low' AMO dimension:
+  Write 1–2 sentences in plain English that contextualise what affected performance across the session.
+  NEVER use labels 'AMO', 'ability', 'motivation', 'opportunity'.
+  Frame as a condition that affected performance, not a critique of the candidate.
+  Example (low opportunity across session): "Several questions in this session were more demanding than
+    your warm-up level — performance under high pressure often understates what you are capable of in
+    a prepared setting. Practice that recreates this pressure will help close that gap."
+  Example (low motivation signal): "Your strongest answers were for the questions you connected to
+    personally — building that personal connection to more of the role's responsibilities will unlock
+    more of your interview capability."
+  Example (all high): return null.
+Return null if all AMO dimensions were high across all questions in the session.
+
 ── elcLearningCycle (Layer A — Kolb ELC session trace, written for candidate) ──────────────────
+[Kolb (1984) Experiential Learning Cycle — all four stages MUST be populated; an incomplete cycle produces no learning]
+[Gibbs (1988) — this section is the candidate-facing synthesis of all six Gibbs stages in one learning arc]
+[Boud & Molloy (2013) — experimentationTarget closes the loop: it is the entry gate to the next ELC cycle]
 Frame this as a learning cycle trace — what happened at each stage of this session.
 Write in plain English. This helps the candidate understand HOW they learned, not just WHAT they did.
 elcLearningCycle: {
@@ -591,6 +879,46 @@ elcLearningCycle: {
   // E.g. "Lead your next Action section with your decision, not the context — say
   // 'I decided to...' before explaining why."
 }
+
+── transcriptAnnotations (Layer A — sentence-level translation coaching) ────────────────────────
+This is the most important coaching field in the report.
+Its purpose: take the candidate's actual words and show them — sentence by sentence — how those
+same ideas would sound in polished, interview-standard language. This is not correction; it is translation.
+
+SCOPE: Identify the 6–10 moments in the transcript with the highest learning leverage.
+A "high-leverage moment" is any phrase where:
+  - A STAR component was addressed (even partially)
+  - Personal agency language appeared or was conspicuously absent
+  - A skill, decision, or outcome was described in a way that could be made more specific
+  - The candidate said something genuinely strong that deserves to be named and anchored
+  - The probe exchange revealed a deeper capability that the initial answer did not express
+
+For each moment, provide this exact structure:
+{
+  moment: string,           // Attribution + verbatim or near-verbatim phrase.
+                            // Format: "When describing [context], you said: '[phrase]'"
+                            // If a probe exchange: "In response to the follow-up question, you added: '[phrase]'"
+  observation: string,      // 2–3 sentences. What this phrase reveals — what it does well first,
+                            // then what single element would make it interview-complete.
+                            // ALWAYS acknowledge the genuine intent or capability behind the phrase.
+                            // Formal, polite, warm. NEVER negative-first.
+  standardVersion: string,  // The complete rewritten sentence, ready to use verbatim.
+                            // Must be in the candidate's voice — personalised to their experience.
+                            // Must feel like a natural upgrade, not a different person speaking.
+                            // Format: "An equally honest and more structured way to express this would be:
+                            // '[complete sentence the candidate could say in an interview]'"
+  principle: string         // One plain-English sentence naming the single principle this rewrite embodies.
+                            // E.g. "Personal ownership language signals decision-making authority to interviewers"
+                            // E.g. "Measurable results give hiring managers something concrete to advocate for"
+                            // NO theoretical labels or citations — plain language the candidate can remember
+}
+
+ABSOLUTE RULES:
+1. standardVersion is a GIFT, not a correction — frame it as a natural, honest upgrade of their own words
+2. Every observation must acknowledge what was accomplished before identifying what remains
+3. NEVER annotate a moment that is already fully interview-standard — only annotate where translation adds value
+4. The tone across all annotations: formal, polite, warm, reinforcing — as if written by a trusted career coach
+5. The candidate must finish reading this section feeling they have a clear, achievable upgrade path
 
 ── masteryTracker (4A — STAR mastery per component, cross-session consolidation) ──
 masteryTracker: {
@@ -671,7 +999,7 @@ text: string
                 evidenceSpecificity: { type: Type.NUMBER },
                 roleClarity: { type: Type.NUMBER },
                 jdAlignment: { type: Type.NUMBER },
-                communicationClarity: { type: Type.NUMBER },
+                confidence: { type: Type.NUMBER },
                 justifications: {
                   type: Type.OBJECT,
                   properties: {
@@ -679,12 +1007,12 @@ text: string
                     evidenceSpecificity: { type: Type.STRING },
                     roleClarity: { type: Type.STRING },
                     jdAlignment: { type: Type.STRING },
-                    communicationClarity: { type: Type.STRING }
+                    confidence: { type: Type.STRING }
                   },
-                  required: ["starCompletion", "evidenceSpecificity", "roleClarity", "jdAlignment", "communicationClarity"]
+                  required: ["starCompletion", "evidenceSpecificity", "roleClarity", "jdAlignment", "confidence"]
                 }
               },
-              required: ["starCompletion", "evidenceSpecificity", "roleClarity", "jdAlignment", "communicationClarity", "justifications"]
+              required: ["starCompletion", "evidenceSpecificity", "roleClarity", "jdAlignment", "confidence", "justifications"]
             },
             meritVectors: {
               type: Type.OBJECT,
@@ -884,6 +1212,37 @@ text: string
               },
               required: ["whatInterviewersLookFor", "candidateAlignedStrengths", "profileGaps", "priorityFix"]
             },
+            transcriptAnnotations: {
+              type: Type.ARRAY,
+              nullable: true,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  moment:          { type: Type.STRING },
+                  observation:     { type: Type.STRING },
+                  standardVersion: { type: Type.STRING },
+                  principle:       { type: Type.STRING }
+                },
+                required: ["moment", "observation", "standardVersion", "principle"]
+              }
+            },
+            cvMissedOpportunities: {
+              type: Type.ARRAY,
+              nullable: true,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  cvItem:          { type: Type.STRING },
+                  questionContext: { type: Type.STRING },
+                  whyItFits:       { type: Type.STRING },
+                  exampleUsage:    { type: Type.STRING }
+                },
+                required: ["cvItem", "questionContext", "whyItFits", "exampleUsage"]
+              }
+            },
+            amoPerformanceContext: { type: Type.STRING, nullable: true },
+            feedbackApproachLevel: { type: Type.STRING, nullable: true },
+            intentionAssessment: { type: Type.STRING, nullable: true },
             elcLearningCycle: {
               type: Type.OBJECT,
               properties: {
@@ -972,13 +1331,13 @@ text: string
         evidenceSpecificity: 0,
         roleClarity: 0,
         jdAlignment: 0,
-        communicationClarity: 0,
+        confidence: 0,
         justifications: {
           starCompletion: "Error during generation",
           evidenceSpecificity: "Error during generation",
           roleClarity: "Error during generation",
           jdAlignment: "Error during generation",
-          communicationClarity: "Error during generation"
+          confidence: "Error during generation"
         }
       },
       maskedTranscript: { text: params.transcript }

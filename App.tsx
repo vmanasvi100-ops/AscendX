@@ -3,19 +3,19 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AscendPlatform from './components/AscendPlatform';
 import WelcomeScreen from './components/WelcomeScreen';
-import ProfilingScreen from './components/ProfilingScreen';
+
 import TourGuide from './components/TourGuide';
 import ProductDashboard from './components/ProductDashboard';
 import { tourSteps } from './data';
-import type { AnalyticsEvent, AnalyticsEventType, CandidateProfile } from './types';
+import type { AnalyticsEvent, AnalyticsEventType } from './types';
 
 type AppState = 'welcome' | 'profiling' | 'interview';
 
-const HardwareConsentModal = ({ onAllow, onClose, error, isLoading }: { onAllow: () => void; onClose: () => void; error: string | null; isLoading: boolean; }) => {
+const HardwareConsentModal = ({ onAllow, onClose, error, isLoading, email, onEmailChange }: { onAllow: () => void; onClose: () => void; error: string | null; isLoading: boolean; email: string; onEmailChange: (v: string) => void; }) => {
   const [cameraConsent, setCameraConsent] = useState(false);
   const [micConsent, setMicConsent] = useState(false);
 
-  const canProceed = cameraConsent && micConsent;
+  const canProceed = cameraConsent && micConsent && email.trim().includes('@');
 
   return (
     <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" aria-modal="true" role="dialog">
@@ -32,9 +32,21 @@ const HardwareConsentModal = ({ onAllow, onClose, error, isLoading }: { onAllow:
             </div>
         </div>
 
-        <p className="text-slate-600 font-medium leading-relaxed mb-8">
+        <p className="text-slate-600 font-medium leading-relaxed mb-6">
             To provide real-time feedback and session recording, Ascend needs access to your hardware. Please confirm the following:
         </p>
+
+        <div className="mb-6">
+            <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Your email — so we can save your progress</label>
+            <input
+                type="email"
+                value={email}
+                onChange={e => onEmailChange(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+            <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Used only to link your sessions on this device. Never shared.</p>
+        </div>
 
         <div className="space-y-4 mb-8">
             <label className="flex items-center gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
@@ -111,12 +123,14 @@ const AppContent: React.FC = () => {
     condition,
     setIsPredictiveActive,
     setFinishSessionTrigger,
-    setCandidateProfile,
   } = useSettings();
-  const [appState, setAppState] = useState<AppState>('welcome');
+  const [appState, setAppState] = useState<AppState>(() =>
+    new URLSearchParams(window.location.search).get('preview') === 'true' ? 'interview' : 'welcome'
+  );
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCheckingPermission, setIsCheckingPermission] = useState(false);
+  const [candidateEmail, setCandidateEmail] = useState('');
 
   // Analytics State
   const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>(() => {
@@ -186,16 +200,10 @@ const AppContent: React.FC = () => {
   }, []);
 
   const startInterview = () => {
-    setAppState('profiling');
-  };
-
-  const handleProfileComplete = (profile: CandidateProfile) => {
-    setCandidateProfile(profile);
-    logEvent('profile_submitted', { ...profile });
     setIsConsentModalOpen(true);
     setCameraError(null);
   };
-  
+
   const handleHardwareApproval = async () => {
     setCameraError(null);
     setIsCheckingPermission(true);
@@ -272,8 +280,7 @@ const AppContent: React.FC = () => {
   return (
     <div className={`min-h-screen w-screen overflow-x-hidden bg-slate-100 text-slate-800 font-sans antialiased ${dyslexiaFont ? 'font-dyslexia-friendly' : ''}`}>
       {appState === 'welcome' && <WelcomeScreen onStart={startInterview} logEvent={logEvent} />}
-      {appState === 'profiling' && <ProfilingScreen onComplete={handleProfileComplete} />}
-      {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} />}
+      {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} email={candidateEmail} />}
 
       {showProductDashboard && (
         <ProductDashboard
@@ -285,11 +292,13 @@ const AppContent: React.FC = () => {
       )}
 
       {isConsentModalOpen && (
-        <HardwareConsentModal 
+        <HardwareConsentModal
             onAllow={handleHardwareApproval}
             onClose={() => setIsConsentModalOpen(false)}
             error={cameraError}
             isLoading={isCheckingPermission}
+            email={candidateEmail}
+            onEmailChange={setCandidateEmail}
         />
       )}
       
