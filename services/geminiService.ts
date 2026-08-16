@@ -1,5 +1,6 @@
 
-import { GoogleGenAI, Type, Chat } from "@google/genai";
+import { Type } from "@google/genai";
+import { generateContent, createChatSession, ChatSession } from "./aiClient";
 import { RubricCriterion, AuditResult } from "../types";
 
 /**
@@ -64,8 +65,6 @@ export const analyzeResume = async (
   companyName: string,
   deepThink: boolean
 ): Promise<AuditResult> => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
   const contentPart = typeof content === 'string'
     ? { text: `CV:\n${content}` }
     : { inlineData: { data: content.data, mimeType: content.mimeType } };
@@ -128,7 +127,7 @@ ANALYSIS TASKS
      note: string
    }`;
 
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: deepThink ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview',
     contents: { parts: [contentPart, { text: systemPrompt }] },
     config: {
@@ -207,28 +206,21 @@ ANALYSIS TASKS
   return JSON.parse(response.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 };
 
-export const startGuidanceChat = (auditResult: AuditResult, role: string): Chat => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
-  return ai.chats.create({
-    model: 'gemini-3-flash-preview',
-    config: {
-      systemInstruction: `You are the Lead Recruitment Auditor. Guide the candidate to bridge the Magnitude Gap for ${role}. Focus on Primary Domains.
-      
+export const startGuidanceChat = (auditResult: AuditResult, role: string): ChatSession => {
+  return createChatSession('gemini-3-flash-preview', {
+    systemInstruction: `You are the Lead Recruitment Auditor. Guide the candidate to bridge the Magnitude Gap for ${role}. Focus on Primary Domains.
+
       ### TONE & PSYCHOLOGICAL SAFETY
       - Be professional, constructive, and encouraging.
       - Never use demotivating language.
       - Frame all feedback as actionable growth steps.
       - Ensure the candidate feels psychologically safe and engaged with their career journey.`,
-    },
   });
 };
 
 export const searchStealthVentures = async (role: string) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Venture Anchor: High-growth startups, stealth ventures, and Series A/B firms globally hiring for this specific role.";
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: 'gemini-3-flash-preview',
     contents: PDP_SCOUT_INSTRUCTION(role, anchor),
     config: { tools: [{ googleSearch: {} }] }
@@ -240,10 +232,8 @@ export const searchStealthVentures = async (role: string) => {
 };
 
 export const searchUnderratedGems = async (role: string) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Hidden Gem Anchor: Specialized industry leaders, mid-market powerhouses, and underrated firms with high-caliber talent bars.";
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: 'gemini-3-flash-preview',
     contents: PDP_SCOUT_INSTRUCTION(role, anchor),
     config: { tools: [{ googleSearch: {} }] }
@@ -255,10 +245,8 @@ export const searchUnderratedGems = async (role: string) => {
 };
 
 export const searchGlobalJobs = async (role: string) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Enterprise Anchor: Major global corporations and market-dominant firms with robust career ecosystems.";
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: 'gemini-3-flash-preview',
     contents: PDP_SCOUT_INSTRUCTION(role, anchor),
     config: { tools: [{ googleSearch: {} }] }
@@ -270,10 +258,8 @@ export const searchGlobalJobs = async (role: string) => {
 };
 
 export const searchHCIOpportunities = async (role: string) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
   const anchor = "Specialist Anchor: Research labs, innovation studios, and deep-tech boutiques relevant to the domain.";
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: 'gemini-3-flash-preview',
     contents: PDP_SCOUT_INSTRUCTION(role, anchor),
     config: { tools: [{ googleSearch: {} }] }
@@ -285,9 +271,7 @@ export const searchHCIOpportunities = async (role: string) => {
 };
 
 export const extractJobListings = async (text: string) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: 'gemini-3-flash-preview',
     contents: `AUDIT PROTOCOL: Extract verified company career hubs from the search text.
     Ensure the "title" is the EXACT job title found or mentioned on the portal.

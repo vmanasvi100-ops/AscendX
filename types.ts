@@ -146,7 +146,8 @@ export type AnalyticsEventType =
   | 'scaffold_toggled' | 'data_synced' | 'data_exported'
   | 'feedback_report_opened' | 'practice_task_noted'
   | 'cv_uploaded' | 'cv_upload_declined' | 'questions_generated' | 'profile_submitted'
-  | 'probe_used';
+  | 'probe_used'
+  | 'question_answered' | 'reflection_submitted' | 'self_rating_submitted';
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
@@ -668,6 +669,8 @@ export interface SessionRecord {
   timestamp: number;
   condition: ExperimentCondition;
   competencyLevels: CompetencyDemonstrationLevel[];
+  lowerBoundaryLevel: CompetencyDemonstrationLevel | null;  // ZPD lower boundary — unprobed (Act 1) performance, averaged across this session's questions
+  upperBoundaryLevel: CompetencyDemonstrationLevel | null;  // ZPD upper boundary — scaffolded (post-probe) performance, averaged across this session's questions
   scaffoldDependencyScore: number;          // 0–100
   regulatoryFocus: 'promotion' | 'prevention' | 'mixed' | 'unclear';
   feedbackOrientation: 'proactive' | 'responsive' | 'avoidant' | 'uncertain';

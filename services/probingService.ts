@@ -1,11 +1,7 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { generateContent } from "./aiClient";
 import { Probe, ProbeAnalysis, QuestionDataAccumulator, QuestionSummaryReport, MesoAccumulator } from "../types";
-
-const getAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  return new GoogleGenAI({ apiKey });
-};
 
 export interface GenerateProbeParams {
   candidateId: string;
@@ -25,7 +21,6 @@ export interface GenerateProbeParams {
 }
 
 export const generateProbe = async (params: GenerateProbeParams): Promise<Probe> => {
-  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
   // 3A — ZPD phase offset: if cross-session scaffold reduced, advance phase thresholds by 1
@@ -55,7 +50,7 @@ export const generateProbe = async (params: GenerateProbeParams): Promise<Probe>
       → By Q4: flag in zpd_note if there is no evidence this was acted upon.`
     : '';
 
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model,
     contents: [
       {
@@ -304,10 +299,9 @@ export interface AnalyzeProbeResponseParams {
 }
 
 export const analyzeProbeResponse = async (params: AnalyzeProbeResponseParams): Promise<ProbeAnalysis> => {
-  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
-  const aiResponse = await ai.models.generateContent({
+  const aiResponse = await generateContent({
     model,
     contents: [
       {
@@ -578,7 +572,6 @@ export interface GenerateQuestionSummaryParams {
 }
 
 export const generateQuestionSummary = async (params: GenerateQuestionSummaryParams): Promise<QuestionSummaryReport> => {
-  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
   const { timerFramingCondition, responseDurations } = params.accumulator;
@@ -612,7 +605,7 @@ export const generateQuestionSummary = async (params: GenerateQuestionSummaryPar
   }
 
   try {
-    const aiResponse = await ai.models.generateContent({
+    const aiResponse = await generateContent({
       model,
       contents: [
         {

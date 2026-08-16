@@ -11,6 +11,9 @@ import consentRoutes from "./backend/routes/consent.js";
 import sessionRoutes from "./backend/routes/sessions.js";
 import flagRoutes from "./backend/routes/flags.js";
 import analyticsRoutes from "./backend/routes/analyticsEvents.js";
+import snapshotRoutes from "./backend/routes/snapshots.js";
+import participantRoutes from "./backend/routes/participants.js";
+import aiRoutes from "./backend/routes/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +34,9 @@ async function startServer() {
   app.use("/api/sessions", sessionRoutes);
   app.use("/api/sessions", flagRoutes);   // /api/sessions/:sessionId/flags
   app.use("/api/analytics", analyticsRoutes);
+  app.use("/api/snapshots", snapshotRoutes);
+  app.use("/api/participants", participantRoutes);
+  app.use("/api/ai", aiRoutes);
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {

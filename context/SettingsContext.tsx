@@ -173,6 +173,12 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       .filter((v): v is number => v !== null);
     const competencySlope = sessionMeans.length >= 2 ? leastSquaresSlope(sessionMeans) : 0;
 
+    // ZPD lower boundary (Vygotsky 1978): unprobed/Act-1 performance, not overall session competency.
+    const lowerBoundaryValues = sessions
+      .map(s => s.lowerBoundaryLevel ? levelMap[s.lowerBoundaryLevel] : null)
+      .filter((v): v is number => v !== null);
+    const lowerBoundarySlope = lowerBoundaryValues.length >= 2 ? leastSquaresSlope(lowerBoundaryValues) : 0;
+
     const scaffoldSlope = leastSquaresSlope(sessions.map(s => s.scaffoldDependencyScore));
     const mesoScaffoldReduced = scaffoldSlope < -0.1;
     const scaffoldTrend: ScaffoldTrend =
@@ -227,7 +233,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       forwardOrientationActioned,
       currentCareerAdaptabilityStage,
       priorFeedForwardAction,
-      zpd_lowerBoundaryAdvanced: competencySlope > 0,
+      zpd_lowerBoundaryAdvanced: lowerBoundaryValues.length >= 2 ? lowerBoundarySlope > 0 : false,
     };
   };
 

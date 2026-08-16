@@ -11,11 +11,11 @@ import type { AnalyticsEvent, AnalyticsEventType } from './types';
 
 type AppState = 'welcome' | 'profiling' | 'interview';
 
-const HardwareConsentModal = ({ onAllow, onClose, error, isLoading, email, onEmailChange }: { onAllow: () => void; onClose: () => void; error: string | null; isLoading: boolean; email: string; onEmailChange: (v: string) => void; }) => {
+const HardwareConsentModal = ({ onAllow, onClose, error, emailError, isLoading, email, onEmailChange, ndaAccepted, onNdaChange }: { onAllow: () => void; onClose: () => void; error: string | null; emailError: string | null; isLoading: boolean; email: string; onEmailChange: (v: string) => void; ndaAccepted: boolean; onNdaChange: (v: boolean) => void; }) => {
   const [cameraConsent, setCameraConsent] = useState(false);
   const [micConsent, setMicConsent] = useState(false);
 
-  const canProceed = cameraConsent && micConsent && email.trim().includes('@');
+  const canProceed = cameraConsent && micConsent && ndaAccepted && email.trim().includes('@');
 
   return (
     <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" aria-modal="true" role="dialog">
@@ -43,9 +43,13 @@ const HardwareConsentModal = ({ onAllow, onClose, error, isLoading, email, onEma
                 value={email}
                 onChange={e => onEmailChange(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className={`w-full px-4 py-3 rounded-2xl border text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-2 transition-colors ${emailError ? 'border-rose-400 focus:border-rose-400 focus:ring-rose-100' : 'border-slate-200 focus:border-blue-400 focus:ring-blue-100'}`}
             />
-            <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Used only to link your sessions on this device. Never shared.</p>
+            {emailError ? (
+                <p className="text-[11px] text-rose-600 mt-1.5 font-bold">{emailError}</p>
+            ) : (
+                <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Used only to link your sessions on this device. Never shared.</p>
+            )}
         </div>
 
         <div className="space-y-4 mb-8">
@@ -73,8 +77,22 @@ const HardwareConsentModal = ({ onAllow, onClose, error, isLoading, email, onEma
                     <span className="text-xs text-slate-500">For audio transcription and analysis.</span>
                 </div>
             </label>
+            <label className="flex items-start gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
+                <input
+                    type="checkbox"
+                    checked={ndaAccepted}
+                    onChange={(e) => onNdaChange(e.target.checked)}
+                    className="mt-1 w-5 h-5 accent-blue-600"
+                />
+                <div className="flex-1">
+                    <span className="block font-black text-slate-900 text-sm uppercase tracking-widest">NDA & Confidentiality Agreement</span>
+                    <span className="text-xs text-slate-500">
+                        I confirm that I have read and signed the <a href="https://docs.google.com/forms/d/e/1FAIpQLScejmkwr0VNMQAjK8SkwZLWMch0irQm1r7n2UZyG_6qovVKVQ/viewform" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline" onClick={(e) => e.stopPropagation()}>NDA Agreement Form</a>. I understand this platform is for personal interview practice only and that its content, logic, and frameworks are protected and remain confidential.
+                    </span>
+                </div>
+            </label>
         </div>
-        
+
         {error && (
             <div className="mb-8 p-4 bg-rose-50 border border-rose-100 text-rose-700 rounded-2xl text-xs flex items-start gap-3 animate-fade-in" role="alert">
                 <div className="p-1.5 bg-rose-100 rounded-lg text-rose-600 shrink-0">
@@ -129,8 +147,10 @@ const AppContent: React.FC = () => {
   );
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [isCheckingPermission, setIsCheckingPermission] = useState(false);
   const [candidateEmail, setCandidateEmail] = useState('');
+  const [ndaAccepted, setNdaAccepted] = useState(false);
 
   // Analytics State
   const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>(() => {
@@ -206,7 +226,26 @@ const AppContent: React.FC = () => {
 
   const handleHardwareApproval = async () => {
     setCameraError(null);
+    setEmailError(null);
     setIsCheckingPermission(true);
+
+    // Validate email domain via MX check. Blocks clearly fake/disposable domains.
+    // Falls through silently if the backend is unavailable so the session still starts.
+    try {
+      const res = await fetch('/api/participants/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: candidateEmail.trim().toLowerCase(), ndaAccepted, participantId }),
+      });
+      if (res.status === 422) {
+        setEmailError('Please use a real email address (e.g. your university or Gmail address).');
+        setIsCheckingPermission(false);
+        return;
+      }
+    } catch {
+      // Backend unavailable — don't block the participant.
+    }
+
     try {
         let stream: MediaStream;
         try {
@@ -296,9 +335,12 @@ const AppContent: React.FC = () => {
             onAllow={handleHardwareApproval}
             onClose={() => setIsConsentModalOpen(false)}
             error={cameraError}
+            emailError={emailError}
             isLoading={isCheckingPermission}
             email={candidateEmail}
-            onEmailChange={setCandidateEmail}
+            onEmailChange={v => { setCandidateEmail(v); setEmailError(null); }}
+            ndaAccepted={ndaAccepted}
+            onNdaChange={setNdaAccepted}
         />
       )}
       

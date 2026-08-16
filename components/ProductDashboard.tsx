@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { AlertTriangle, Globe, ShieldCheck, ExternalLink, Link, Copy, Check } from 'lucide-react';
+import { Copy, Check } from 'lucide-react';
 import { AnalyticsEvent } from '../types';
 
 interface ProductDashboardProps {
@@ -10,11 +10,198 @@ interface ProductDashboardProps {
     onClearParticipant?: (participantId: string) => void;
 }
 
-type DashboardTab = 'links' | 'participants' | 'funnel' | 'architecture' | 'adoption' | 'engagement' | 'costs' | 'raw_data';
+type DashboardTab = 'links' | 'participants' | 'registration' | 'funnel' | 'raw_data';
+
+// ── CSV Export ───────────────────────────────────────────────────────────────
+// Builds a per-question-per-session CSV from the analytics event log.
+// Participants are numbered anonymously (P001, P002 …) by first-seen order.
+// No name, no company, no question text — only behavioural signals plus the
+// registered email (joined via participant_id), if one is on file.
+
+function buildCSV(events: AnalyticsEvent[], emailByPid: Map<string, string>): string {
+    const csvCell = (v: unknown) => {
+        const s = v === null || v === undefined ? '' : String(v);
+        return s.includes(',') || s.includes('"') || s.includes('\n')
+            ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    // Assign anonymous P-IDs ordered by each participant's first event
+    const firstSeen = new Map<string, number>();
+    [...events].sort((a, b) => a.timestamp - b.timestamp).forEach(e => {
+        if (!firstSeen.has(e.participantId)) firstSeen.set(e.participantId, firstSeen.size + 1);
+    });
+    const anonId = (pid: string) => `P${String(firstSeen.get(pid) ?? 0).padStart(3, '0')}`;
+
+    // Group events by participant, sorted chronologically
+    const byParticipant = new Map<string, AnalyticsEvent[]>();
+    [...events].sort((a, b) => a.timestamp - b.timestamp).forEach(e => {
+        if (!byParticipant.has(e.participantId)) byParticipant.set(e.participantId, []);
+        byParticipant.get(e.participantId)!.push(e);
+    });
+
+    const HEADERS = [
+        'participant_id', 'email', 'session_date', 'session_number',
+        'timer_mode', 'tool_keyword_pathfinder', 'tool_filler_counter', 'tool_checklist',
+        'dyslexia_font', 'video_enabled',
+        'question_number', 'question_type',
+        'probe_used', 'depth_delta',
+        'star_situation', 'star_task', 'star_action', 'star_result',
+        'response_text',
+        'reflection_completed', 'reflection_text_length',
+        'self_rating_completed', 'self_rating_situation', 'self_rating_task',
+        'self_rating_action', 'self_rating_result',
+    ];
+
+    const rows: string[][] = [HEADERS];
+
+    byParticipant.forEach((pEvents, pid) => {
+        // Split into sessions by session_start events
+        const sessionStarts = pEvents.filter(e => e.type === 'session_start' && e.metadata?.mode === 'interview');
+
+        sessionStarts.forEach((startEvt, sessionIdx) => {
+            const nextStart = sessionStarts[sessionIdx + 1];
+            // Events that belong to this session window
+            const window = pEvents.filter(e =>
+                e.timestamp >= startEvt.timestamp &&
+                (!nextStart || e.timestamp < nextStart.timestamp)
+            );
+
+            const cfg = startEvt.metadata ?? {};
+            const timerMode    = cfg.timerDisplay ?? '';
+            const toolKw       = cfg.liveTools?.keywordPathfinder ? 'yes' : 'no';
+            const toolFiller   = cfg.liveTools?.fillerWordCounter  ? 'yes' : 'no';
+            const toolCheck    = cfg.liveTools?.questionChecklist  ? 'yes' : 'no';
+            const dyslexia     = cfg.dyslexiaFont   ? 'yes' : 'no';
+            const video        = cfg.videoEnabled   ? 'yes' : 'no';
+            const sessionDate  = new Date(startEvt.timestamp).toISOString().slice(0, 10);
+
+            const reflectionEvt    = window.find(e => e.type === 'reflection_submitted');
+            const selfRatingEvt    = window.find(e => e.type === 'self_rating_submitted');
+            const questionEvts     = window.filter(e => e.type === 'question_answered')
+                .sort((a, b) => (a.metadata?.questionIndex ?? 0) - (b.metadata?.questionIndex ?? 0));
+
+            // One row per question answered in this session
+            questionEvts.forEach(qEvt => {
+                const q = qEvt.metadata ?? {};
+                rows.push([
+                    anonId(pid),
+                    emailByPid.get(pid) ?? '',
+                    sessionDate,
+                    String(sessionIdx + 1),
+                    timerMode, toolKw, toolFiller, toolCheck, dyslexia, video,
+                    String((q.questionIndex ?? 0) + 1),
+                    q.questionType ?? '',
+                    q.probeUsed ? 'yes' : 'no',
+                    q.depthDelta ?? '',
+                    q.starSituation != null ? String(q.starSituation) : '',
+                    q.starTask      != null ? String(q.starTask)      : '',
+                    q.starAction    != null ? String(q.starAction)    : '',
+                    q.starResult    != null ? String(q.starResult)    : '',
+                    q.responseText ?? '',
+                    reflectionEvt ? (reflectionEvt.metadata?.completed ? 'yes' : 'no') : '',
+                    reflectionEvt ? String(reflectionEvt.metadata?.textLength ?? 0) : '',
+                    selfRatingEvt ? (selfRatingEvt.metadata?.completed ? 'yes' : 'no') : '',
+                    selfRatingEvt?.metadata?.selfRatingSituation ?? '',
+                    selfRatingEvt?.metadata?.selfRatingTask      ?? '',
+                    selfRatingEvt?.metadata?.selfRatingAction    ?? '',
+                    selfRatingEvt?.metadata?.selfRatingResult    ?? '',
+                ].map(csvCell));
+            });
+
+            // If no questions tracked yet (e.g. session in progress), emit a session-level row
+            if (questionEvts.length === 0) {
+                rows.push([
+                    anonId(pid), emailByPid.get(pid) ?? '', sessionDate, String(sessionIdx + 1),
+                    timerMode, toolKw, toolFiller, toolCheck, dyslexia, video,
+                    '', '', '', '', '', '', '', '', '',
+                    reflectionEvt ? (reflectionEvt.metadata?.completed ? 'yes' : 'no') : '',
+                    reflectionEvt ? String(reflectionEvt.metadata?.textLength ?? 0) : '',
+                    selfRatingEvt ? (selfRatingEvt.metadata?.completed ? 'yes' : 'no') : '',
+                    '', '', '', '',
+                ].map(csvCell));
+            }
+        });
+    });
+
+    // UTF-8 BOM for Excel compatibility
+    return '﻿' + rows.map(r => r.join(',')).join('\n');
+}
 
 const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, onClearAll, onClearParticipant }) => {
     const [activeTab, setActiveTab] = useState<DashboardTab>('links');
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+    // ── Registration tab state ────────────────────────────────────────────────
+    type RegParticipant = {
+        email: string; registered_at: string; note: string | null;
+        session_count: number; first_seen_at: string | null; last_seen_at: string | null;
+        domain_type: 'institutional' | 'consumer' | 'other' | null;
+        participant_id: string | null;
+    };
+    const [regParticipants, setRegParticipants] = React.useState<RegParticipant[]>([]);
+    const [regLoading, setRegLoading] = React.useState(false);
+    const [regBulkInput, setRegBulkInput] = React.useState('');
+    const [regAdding, setRegAdding] = React.useState(false);
+    const [regError, setRegError] = React.useState<string | null>(null);
+    const [regSuccess, setRegSuccess] = React.useState<string | null>(null);
+
+    const fetchRegistered = React.useCallback(async () => {
+        setRegLoading(true);
+        try {
+            const res = await fetch('/api/participants');
+            if (res.ok) setRegParticipants((await res.json()).participants ?? []);
+        } catch { /* backend unavailable */ }
+        finally { setRegLoading(false); }
+    }, []);
+
+    React.useEffect(() => {
+        fetchRegistered();
+    }, [fetchRegistered]);
+
+    // participant_id (anonymous analytics ID) -> email, so exports can join the two.
+    const emailByParticipantId = React.useMemo(() => {
+        const map = new Map<string, string>();
+        regParticipants.forEach(p => { if (p.participant_id) map.set(p.participant_id, p.email); });
+        return map;
+    }, [regParticipants]);
+
+    const handleAddParticipants = async () => {
+        const emails = regBulkInput.split(/[\n,;]+/).map(e => e.trim()).filter(e => e.includes('@'));
+        if (emails.length === 0) { setRegError('No valid email addresses found.'); return; }
+        setRegAdding(true); setRegError(null); setRegSuccess(null);
+        try {
+            const res = await fetch('/api/participants', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ emails }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setRegSuccess(`${data.added} participant${data.added !== 1 ? 's' : ''} registered.`);
+                setRegBulkInput('');
+                fetchRegistered();
+            } else { setRegError(data.error ?? 'Failed to add participants.'); }
+        } catch { setRegError('Backend unavailable.'); }
+        finally { setRegAdding(false); }
+    };
+
+    const handleRemoveParticipant = async (email: string) => {
+        try {
+            await fetch(`/api/participants/${encodeURIComponent(email)}`, { method: 'DELETE' });
+            setRegParticipants(prev => prev.filter(p => p.email !== email));
+        } catch { /* ignore */ }
+    };
+
+    const handleExportStudyCSV = () => {
+        const csv = buildCSV(events, emailByParticipantId);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ascendx-study-data-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
     // --- Statistical Utilities ---
     const getMedian = (values: number[]) => {
@@ -204,6 +391,9 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                     lt.questionChecklist && 'Checklist',
                 ].filter(Boolean).join(', ');
                 row.liveTools = enabled || 'None';
+                // Reset per session — otherwise a CV uploaded in an earlier session
+                // would still read "Yes" for a later session that skipped it.
+                row.cvUploaded = '—';
             }
             if (e.type === 'cv_uploaded') row.cvUploaded = 'Yes';
             if (e.type === 'cv_upload_declined' && row.cvUploaded === '—') row.cvUploaded = 'No';
@@ -225,7 +415,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
 
     const handleExportCSV = () => {
         const headers = [
-            'Participant ID', 'Condition',
+            'Participant ID', 'Email', 'Condition',
             'Timer Display', 'Timer Preference Answer', 'Dyslexia Font', 'Live Tools',
             'CV Uploaded',
             'Interview Experience', 'How They Use Feedback', 'How They Seek Feedback',
@@ -240,6 +430,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                 : '—';
             return [
                 r.participantId,
+                emailByParticipantId.get(r.participantId) ?? '—',
                 r.condition,
                 r.timerDisplay,
                 r.timerPreferenceAnswer,
@@ -306,12 +497,9 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
     const tabLabels: Record<DashboardTab, string> = {
         links: 'Participant Links',
         participants: 'Participants',
-        funnel: 'Funnel Stats',
-        architecture: 'Vision Architecture',
-        adoption: 'Feature Adoption',
-        engagement: 'Engagement',
-        costs: 'Cost Estimator',
-        raw_data: 'Raw Data Log'
+        registration: 'Study Registration',
+        funnel: 'Funnel & Stats',
+        raw_data: 'Raw Data Log',
     };
 
     return (
@@ -342,7 +530,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                 </header>
 
                 <nav className="flex px-8 border-b border-slate-800 bg-slate-900/30 overflow-x-auto">
-                    {(['links', 'participants', 'funnel', 'architecture', 'adoption', 'engagement', 'costs', 'raw_data'] as DashboardTab[]).map(tab => (
+                    {(['links', 'participants', 'registration', 'funnel', 'raw_data'] as DashboardTab[]).map(tab => (
                         <button 
                             key={tab} 
                             onClick={() => setActiveTab(tab)}
@@ -492,36 +680,108 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                         </div>
                     )}
 
-                    {activeTab === 'architecture' && (
-                        <div className="h-full flex flex-col items-center justify-center space-y-12 animate-fade-in p-6">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full max-w-5xl">
-                                {[
-                                    { step: '01', title: 'Clinical Audit', desc: 'Evidence vectors & Magnitude mapping', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
-                                    { step: '02', title: 'GPDP Scout', desc: 'Direct primary domain acquisition', icon: 'M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-                                    { step: '03', title: 'Case Sandbox', desc: 'Cognitive gap bridging & strategy', icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a2 2 0 00-1.96 1.414l-.5 1.5a2 2 0 00-1.96 1.414l-.5 1.5a2 2 0 01-1.144 1.25l-2.02.76a2 2 0 01-1.92-.12l-1.5-1.125a2 2 0 00-2.31 0l-1.5 1.125a2 2 0 01-1.92.12l-2.02-.76a2 2 0 01-1.144-1.25l-.5-1.5a2 2 0 00-1.96-1.414l-2.387.477a2 2 0 00-1.022.547' },
-                                    { step: '04', title: 'Coherence', desc: 'Real-time narrative scaffolding', icon: 'M13 10V3L4 14h7v7l9-11h-7z' }
-                                ].map((node, i) => (
-                                    <div key={i} className="bg-slate-800 border border-slate-700 p-6 rounded-3xl flex flex-col items-center text-center space-y-4 shadow-xl">
-                                        <div className="w-10 h-10 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center font-black text-xs border border-indigo-500/20">{node.step}</div>
-                                        <h4 className="text-sm font-black text-white uppercase tracking-tight">{node.title}</h4>
-                                        <p className="text-[10px] text-slate-500 font-medium leading-relaxed">{node.desc}</p>
-                                    </div>
-                                ))}
+                    {activeTab === 'registration' && (
+                        <div className="animate-fade-in flex flex-col gap-6 h-full">
+                            {/* Add participants */}
+                            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Register Participants</p>
+                                <p className="text-[11px] text-slate-500 mb-4">Paste emails — one per line, or separated by commas. Any real email can start an interview; this list tracks who participated.</p>
+                                <textarea
+                                    value={regBulkInput}
+                                    onChange={e => { setRegBulkInput(e.target.value); setRegError(null); setRegSuccess(null); }}
+                                    placeholder={"alice@university.ac.uk\nbob@university.ac.uk"}
+                                    rows={4}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-[11px] text-slate-300 font-mono placeholder:text-slate-600 focus:outline-none focus:border-blue-500 resize-none mb-3"
+                                />
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={handleAddParticipants}
+                                        disabled={regAdding || !regBulkInput.trim()}
+                                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+                                    >
+                                        {regAdding ? 'Adding…' : 'Register Emails'}
+                                    </button>
+                                    {regSuccess && <span className="text-[10px] font-bold text-emerald-400">{regSuccess}</span>}
+                                    {regError   && <span className="text-[10px] font-bold text-rose-400">{regError}</span>}
+                                </div>
                             </div>
-                            
-                            <div className="bg-slate-800/40 border border-slate-700 p-10 rounded-[48px] max-w-4xl w-full text-center space-y-6">
-                                <h3 className="text-2xl font-black text-white uppercase tracking-tighter">The Asycend Architectural Loop</h3>
-                                <p className="text-sm text-slate-400 leading-relaxed font-medium px-8">
-                                    "We transform high-potential human capital into high-performance organizational assets. By treating merit as measurable physics, we eliminate the 'Vibe' bias of traditional recruitment and replace it with direct, scientific alignment between candidate magnitude and enterprise complexity."
-                                </p>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    {['Self-Determination Theory', 'Bloom\'s Taxonomy', 'Magnitude Vectoring', 'Agency Shift Delta', 'GPDP v7.0'].map(tag => (
-                                        <span key={tag} className="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase tracking-widest rounded-full">{tag}</span>
-                                    ))}
+
+                            {/* Registered list */}
+                            <div className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
+                                <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                        {regLoading ? 'Loading…' : `${regParticipants.length} Registered`}
+                                    </span>
+                                    <button onClick={fetchRegistered} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors">
+                                        Refresh
+                                    </button>
+                                </div>
+                                <div className="flex-1 overflow-auto custom-scrollbar">
+                                    {regParticipants.length === 0 ? (
+                                        <div className="flex items-center justify-center h-32 text-slate-600 text-[11px] font-bold uppercase tracking-widest">
+                                            No participants registered yet
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-left border-collapse">
+                                            <thead className="sticky top-0 bg-slate-900 z-10 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                                <tr>
+                                                    <th className="p-3 border-b border-slate-800">Email</th>
+                                                    <th className="p-3 border-b border-slate-800">Domain</th>
+                                                    <th className="p-3 border-b border-slate-800">Registered</th>
+                                                    <th className="p-3 border-b border-slate-800 text-center">Sessions</th>
+                                                    <th className="p-3 border-b border-slate-800">Last Seen</th>
+                                                    <th className="p-3 border-b border-slate-800">Note</th>
+                                                    <th className="p-3 border-b border-slate-800"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/50">
+                                                {regParticipants.map(p => (
+                                                    <tr key={p.email} className="hover:bg-white/5 transition-colors group">
+                                                        <td className="p-3 text-[10px] font-mono text-indigo-400">{p.email}</td>
+                                                        <td className="p-3">
+                                                            {p.domain_type === 'institutional' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-900/50 text-blue-300 text-[9px] font-black uppercase tracking-widest">
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /></svg>
+                                                                    Institutional
+                                                                </span>
+                                                            )}
+                                                            {p.domain_type === 'consumer' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-400 text-[9px] font-black uppercase tracking-widest">
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                                                                    Personal
+                                                                </span>
+                                                            )}
+                                                            {(p.domain_type === 'other' || p.domain_type == null) && (
+                                                                <span className="text-[9px] text-slate-600 font-bold">—</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3 text-[10px] text-slate-500">{new Date(p.registered_at).toLocaleDateString()}</td>
+                                                        <td className="p-3 text-[10px] text-center">
+                                                            <span className={p.session_count > 0 ? 'text-emerald-400 font-black' : 'text-slate-600'}>{p.session_count}</span>
+                                                        </td>
+                                                        <td className="p-3 text-[10px] text-slate-500">
+                                                            {p.last_seen_at ? new Date(p.last_seen_at).toLocaleDateString() : '—'}
+                                                        </td>
+                                                        <td className="p-3 text-[10px] text-slate-500 italic">{p.note ?? '—'}</td>
+                                                        <td className="p-3">
+                                                            <button
+                                                                onClick={() => handleRemoveParticipant(p.email)}
+                                                                title="Remove participant"
+                                                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg bg-rose-900/50 hover:bg-rose-700 text-rose-400"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     )}
+
 
                     {activeTab === 'funnel' && (
                         <div className="space-y-10 animate-fade-in">
@@ -566,143 +826,36 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                                     ))}
                                 </div>
                             </section>
-                        </div>
-                    )}
 
-                    {activeTab === 'adoption' && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-fade-in">
-                            {[
-                                { label: 'Cognitive Scaffold', rate: productMetrics.adoptionRates.scaffold, desc: 'Engaged with AI-driven structural feedback.' },
-                                { label: 'Thought Sandbox', rate: productMetrics.adoptionRates.sandbox, desc: 'Utilized the drafting and reflection space.' },
-                                { label: 'Reflection Breaks', rate: productMetrics.adoptionRates.breaks, desc: 'Triggered a deliberate pause for coherence.' }
-                            ].map(feature => (
-                                <div key={feature.label} className="bg-slate-800/20 p-8 rounded-[32px] border border-slate-800 flex flex-col items-center text-center space-y-4">
-                                    <div className="w-16 h-1 bg-blue-500/20 rounded-full overflow-hidden">
-                                        <div className="h-full bg-blue-500" style={{ width: `${feature.rate}%` }}></div>
-                                    </div>
-                                    <h4 className="text-2xl font-black text-white">{feature.rate}%</h4>
-                                    <div>
-                                        <p className="text-[10px] font-black uppercase text-slate-300 tracking-widest">{feature.label}</p>
-                                        <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">{feature.desc}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {activeTab === 'engagement' && (
-                        <div className="space-y-10 animate-fade-in">
-                            <div className="bg-slate-800/30 p-10 rounded-[40px] border border-slate-800 flex flex-col md:flex-row gap-12 items-center">
-                                <div className="space-y-2 text-center md:text-left">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Global Median Time-on-Phase</p>
-                                    <p className="text-6xl font-black text-white">{productMetrics.medianDuration}s</p>
-                                    <p className="text-xs text-indigo-400 font-bold">IQR: {productMetrics.iqr.q1}s - {productMetrics.iqr.q3}s</p>
-                                </div>
-                                <div className="flex-1 bg-slate-950 p-6 rounded-3xl border border-slate-800">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase mb-4 tracking-widest">Aggregate Interaction Benchmark</p>
-                                    <p className="text-xs text-slate-400 leading-relaxed">
-                                        The stable median duration across (N={productMetrics.totalUniqueParticipants}) participants validates the platform's structural consistency across diverse cognitive profiles.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'costs' && (
-                        <div className="space-y-10 animate-fade-in">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div className="bg-slate-800/40 p-8 rounded-[32px] border border-slate-800 text-center">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Gemini AI (Est.)</p>
-                                    <p className="text-4xl font-black text-white">${productMetrics.costs.gemini}</p>
-                                    <p className="text-[10px] text-slate-500 mt-2">Based on $0.05 / full session</p>
-                                </div>
-                                <div className="bg-slate-800/40 p-8 rounded-[32px] border border-slate-800 text-center">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Cloud Hosting (Est.)</p>
-                                    <p className="text-4xl font-black text-white">${productMetrics.costs.cloud}</p>
-                                    <p className="text-[10px] text-slate-500 mt-2">Based on $0.001 / session</p>
-                                </div>
-                                <div className="bg-slate-800/40 p-8 rounded-[32px] border border-slate-800 text-center">
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Search Grounding (Est.)</p>
-                                    <p className="text-4xl font-black text-white">${productMetrics.costs.search}</p>
-                                    <p className="text-[10px] text-slate-500 mt-2">Based on $0.002 / search</p>
-                                </div>
-                            </div>
-
-                            <div className="bg-blue-600/10 border border-blue-500/20 p-10 rounded-[40px] flex flex-col md:flex-row justify-between items-center gap-8">
-                                <div className="space-y-2">
-                                    <h3 className="text-2xl font-black text-white uppercase tracking-tight">Total Estimated Burn</h3>
-                                    <p className="text-sm text-slate-400">Calculated across all historical participant signals.</p>
-                                </div>
-                                <div className="text-center md:text-right">
-                                    <p className="text-6xl font-black text-blue-400">${productMetrics.costs.total}</p>
-                                    <p className="text-[10px] font-black uppercase text-blue-500 tracking-widest mt-2">Projected Operational Cost</p>
-                                </div>
-                            </div>
-
-                            <div className="bg-slate-800/20 border border-slate-800 p-8 rounded-[32px] space-y-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                                    <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">Scaling & Monitoring Protocol</h4>
-                                </div>
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                    {/* Billing Alerts */}
-                                    <div className="space-y-4 p-6 bg-slate-900/50 rounded-2xl border border-slate-800/50 group hover:border-blue-500/30 transition-colors">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <AlertTriangle className="w-3 h-3 text-blue-400" />
-                                                <p className="text-[11px] font-bold text-white uppercase tracking-tight">01. Billing Alerts</p>
+                            {/* Adoption + Engagement — condensed */}
+                            <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4">Feature Adoption</p>
+                                    <div className="space-y-3">
+                                        {[
+                                            { label: 'Cognitive Scaffold', rate: productMetrics.adoptionRates.scaffold },
+                                            { label: 'Thought Sandbox',    rate: productMetrics.adoptionRates.sandbox },
+                                            { label: 'Reflection Breaks',  rate: productMetrics.adoptionRates.breaks },
+                                        ].map(f => (
+                                            <div key={f.label}>
+                                                <div className="flex justify-between mb-1">
+                                                    <span className="text-[10px] text-slate-400 font-bold">{f.label}</span>
+                                                    <span className="text-[10px] font-black text-white">{f.rate}%</span>
+                                                </div>
+                                                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${f.rate}%` }} />
+                                                </div>
                                             </div>
-                                            <div className="px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[8px] font-black text-blue-400 uppercase">Critical</div>
-                                        </div>
-                                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                                            Navigate to <strong>Billing {'>'} Budgets</strong> in GCP. Create a budget for $10.00. 
-                                            Configure alerts at 50%, 90%, and 100% of spend to prevent "bill shock" during viral growth.
-                                        </p>
-                                        <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                                            <p className="text-[9px] font-mono text-slate-500 uppercase tracking-tighter">Target: alerts@yourdomain.com</p>
-                                            <ExternalLink className="w-2.5 h-2.5 text-slate-600 group-hover:text-blue-400 transition-colors" />
-                                        </div>
-                                    </div>
-
-                                    {/* Custom Domain */}
-                                    <div className="space-y-4 p-6 bg-slate-900/50 rounded-2xl border border-slate-800/50 group hover:border-indigo-500/30 transition-colors">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <Globe className="w-3 h-3 text-indigo-400" />
-                                                <p className="text-[11px] font-bold text-white uppercase tracking-tight">02. Custom Domain</p>
-                                            </div>
-                                            <div className="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[8px] font-black text-indigo-400 uppercase">Identity</div>
-                                        </div>
-                                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                                            In <strong>Cloud Run {'>'} Manage Custom Domains</strong>, map your apex domain. 
-                                            Update your DNS with the provided A/AAAA records. SSL is auto-provisioned by Google.
-                                        </p>
-                                        <div className="pt-2 border-t border-slate-800 text-[9px] font-mono text-slate-500 flex justify-between items-center">
-                                            <span>TTL: 3600s</span>
-                                            <ExternalLink className="w-2.5 h-2.5 text-slate-600 group-hover:text-indigo-400 transition-colors" />
-                                        </div>
-                                    </div>
-
-                                    {/* API Quotas */}
-                                    <div className="space-y-4 p-6 bg-slate-900/50 rounded-2xl border border-slate-800/50 group hover:border-emerald-500/30 transition-colors">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                                                <p className="text-[11px] font-bold text-white uppercase tracking-tight">03. API Quotas</p>
-                                            </div>
-                                            <div className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-black text-emerald-400 uppercase">Safety</div>
-                                        </div>
-                                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                                            Restrict your <strong>Gemini API Key</strong> to only allow requests from your Cloud Run service. 
-                                            Set daily request caps in the AI Studio console to limit maximum exposure.
-                                        </p>
-                                        <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                                            <p className="text-[9px] font-mono text-slate-500 uppercase tracking-tighter">Status: Unrestricted</p>
-                                            <ExternalLink className="w-2.5 h-2.5 text-slate-600 group-hover:text-emerald-400 transition-colors" />
-                                        </div>
+                                        ))}
                                     </div>
                                 </div>
-                            </div>
+                                <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center">
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Median Time-on-Phase</p>
+                                    <p className="text-5xl font-black text-white">{productMetrics.medianDuration}<span className="text-xl text-slate-500 ml-1">s</span></p>
+                                    <p className="text-[10px] text-indigo-400 font-bold mt-1">IQR: {productMetrics.iqr.q1}s – {productMetrics.iqr.q3}s</p>
+                                    <p className="text-[10px] text-slate-500 mt-3">Across N={productMetrics.totalUniqueParticipants} participants</p>
+                                </div>
+                            </section>
                         </div>
                     )}
 
@@ -739,11 +892,17 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
 
                 </main>
 
-                <footer className="p-6 bg-slate-950 border-t border-slate-800 flex justify-between items-center">
+                <footer className="p-6 bg-slate-950 border-t border-slate-800 flex justify-between items-center gap-4">
                     <div className="flex items-center gap-3">
                         <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                         <span className="text-[9px] font-black uppercase text-slate-500 tracking-[0.2em]">System Integrity Verified</span>
                     </div>
+                    <button
+                        onClick={handleExportStudyCSV}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest transition-colors"
+                    >
+                        Export Study CSV
+                    </button>
                     <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">
                         Autonomy-Preserving Diagnostic Model v2.1
                     </p>

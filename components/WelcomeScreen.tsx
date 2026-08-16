@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { ShieldCheck, Wand2, ShieldAlert, FileUp, FileCheck, Loader2 } from 'lucide-react';
+import { Wand2, ShieldAlert, FileUp, FileCheck, Loader2 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -145,8 +145,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
     }, [preSessionAnswer, cvText, jobDescription, setTimerFramingCondition]);
     const [pdfFileName, setPdfFileName] = useState<string | null>(null);
     const [generationError, setGenerationError] = useState<string | null>(null);
-    const [ndaAccepted, setNdaAccepted] = useState(false);
-    const [showNdaError, setShowNdaError] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -243,10 +241,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
     };
 
     const handleGenerateQuestions = async () => {
-        if (!ndaAccepted) {
-            setShowNdaError(true);
-            return;
-        }
         if (!jobDescription.trim() || !companyName.trim() || !targetRole.trim()) {
             setGenerationError("Please provide Company Name, Target Role, and Job Description.");
             return;
@@ -318,18 +312,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
 
     const handleStart = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (!ndaAccepted) {
-            setShowNdaError(true);
-            return;
-        }
         onStart();
     };
 
     const handleInitiatePractice = (questions: Question[]) => {
-        if (!ndaAccepted) {
-            setShowNdaError(true);
-            return;
-        }
         logEvent('session_start', { mode: 'predictive_alignment' });
         setActiveQuestions(questions);
         onStart();
@@ -417,42 +403,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                         </div>
 
                         <div className="space-y-10">
-                            <div id="welcome-nda-agreement">
-                                <fieldset>
-                                    <div className="flex items-center mb-4" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                        <legend className="text-xl font-bold text-slate-800">Legal & Privacy</legend>
-                                        <ShieldCheck className="w-5 h-5 ml-2 text-emerald-600" />
-                                    </div>
-                                    <div className={`p-6 rounded-2xl border-2 transition-all ${ndaAccepted ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50'}`} onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                        <div className="flex items-start gap-4">
-                                            <input
-                                                type="checkbox"
-                                                id="nda-checkbox"
-                                                checked={ndaAccepted}
-                                                onChange={(e) => {
-                                                    setNdaAccepted(e.target.checked);
-                                                    if (e.target.checked) setShowNdaError(false);
-                                                }}
-                                                className="mt-1 w-5 h-5 accent-blue-600 cursor-pointer"
-                                            />
-                                            <div className="flex-1">
-                                                <label htmlFor="nda-checkbox" className="block font-black text-slate-900 text-sm uppercase tracking-widest cursor-pointer">
-                                                    NDA & Confidentiality Agreement
-                                                </label>
-                                                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                                                    I confirm that I have read and signed the <a href="https://docs.google.com/forms/d/e/1FAIpQLScejmkwr0VNMQAjK8SkwZLWMch0irQm1r7n2UZyG_6qovVKVQ/viewform" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline inline-flex items-center gap-1">NDA Agreement Form <ShieldCheck size={12} /></a>. I understand this platform is for personal interview practice only and that its content, logic, and frameworks are protected and remains confidential.
-                                                </p>
-                                                {showNdaError && (
-                                                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mt-3 animate-pulse">
-                                                        Required: Please take a moment to read and agree to our terms, this protects both you and Ascend.
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </fieldset>
-                            </div>
-
                             <div id="welcome-timer-display">
                                 <fieldset>
                                     <div className="flex items-center mb-4" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>

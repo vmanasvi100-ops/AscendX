@@ -1,11 +1,6 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { generateContent } from "./aiClient";
 import { Question, JDCVAlignmentAnalysis } from "../types";
-
-const getAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  return new GoogleGenAI({ apiKey });
-};
 
 // Retry with exponential backoff — handles rate limits and transient failures
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delayMs = 1000): Promise<T> => {
@@ -77,8 +72,6 @@ export const generateInitialQuestions = async (
   targetRole: string,
   companyLink?: string
 ): Promise<Question[]> => {
-  const ai = getAI();
-
   const prompt = `
 You are a senior occupational psychologist designing a structured competency interview.
 Generate exactly 5 interview questions for the role below, following a warmup-to-strategic progression.
@@ -133,7 +126,7 @@ CRITICAL: Q1 is always motivational — its requirements MUST use the INTRODUCTI
 Return ONLY the JSON array. No markdown, no explanation.
   `;
 
-  const response = await withRetry(() => ai.models.generateContent({
+  const response = await withRetry(() => generateContent({
     model: "gemini-3-flash-preview",
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: "application/json" },
@@ -260,7 +253,6 @@ export const generateJDCVAlignmentQuestions = async (
   if (distinctJdWords.size < 8 || !hasSignalWord) {
     return { questions: [], analysis: null };
   }
-  const ai = getAI();
   const prompt = `
 You are a senior occupational psychologist and behavioural interview designer.
 Compare this candidate's CV against the job description for ${targetRole} at ${companyName}.
@@ -311,7 +303,7 @@ IMPORTANT for experienceAlignment: score each JD requirement independently and h
 Return ONLY the JSON object. No markdown, no explanation.
   `;
   try {
-    const response = await withRetry(() => ai.models.generateContent({
+    const response = await withRetry(() => generateContent({
       model: 'gemini-3-flash-preview',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: { responseMimeType: 'application/json' }
@@ -333,7 +325,6 @@ export const generateCVCompetencyQuestions = async (
   companyName: string
 ): Promise<Question[]> => {
   if (!cvText.trim()) return [];
-  const ai = getAI();
   const prompt = `
 You are a senior occupational psychologist. Based on this candidate's CV, generate exactly 3 behavioural
 interview questions that probe whether their stated competencies and achievements are genuinely evidenced.
@@ -367,7 +358,7 @@ Return a JSON array of exactly 3 Question objects, each with:
 Use ids like "cv1-s", "cv1-t", "cv1-a", "cv1-r".
 Return ONLY the JSON array. No markdown, no explanation.
   `;
-  const response = await withRetry(() => ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { responseMimeType: 'application/json' } }));
+  const response = await withRetry(() => generateContent({ model: 'gemini-3-flash-preview', contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { responseMimeType: 'application/json' } }));
   return parseQuestions(response.text, 'cv', 'CV competency');
 };
 
@@ -377,7 +368,6 @@ export const generateJDUnderstandingQuestions = async (
   targetRole: string,
   companyName: string
 ): Promise<Question[]> => {
-  const ai = getAI();
   const prompt = `
 You are a senior occupational psychologist. Based on this job description, generate exactly 3 questions
 that test whether the candidate has genuinely thought about what this specific role demands and why.
@@ -414,6 +404,6 @@ Return a JSON array of exactly 3 Question objects, each with:
 Use ids like "jd1-s", "jd1-t", "jd1-a", "jd1-r".
 Return ONLY the JSON array. No markdown, no explanation.
   `;
-  const response = await withRetry(() => ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { responseMimeType: 'application/json' } }));
+  const response = await withRetry(() => generateContent({ model: 'gemini-3-flash-preview', contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { responseMimeType: 'application/json' } }));
   return parseQuestions(response.text, 'jd', 'JD understanding');
 };

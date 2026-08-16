@@ -9,6 +9,11 @@ const __dirname = path.dirname(__filename);
 const MIGRATIONS = [
   '001_initial.sql',
   '002_analytics_events.sql',
+  '003_participant_snapshots.sql',
+  '004_registered_participants.sql',
+  '005_domain_type.sql',
+  '006_nda_consent.sql',
+  '007_participant_id.sql',
 ];
 
 export const runMigrations = async (): Promise<void> => {

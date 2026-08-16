@@ -1,9 +1,9 @@
-import { GoogleGenAI } from '@google/genai';
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { RecordingStatus, AnalyticsEventType, TimerDisplay, Question, Probe, ProbeAnalysis, DetailedFeedback, QuestionSummaryReport, TimerFramingCondition, SessionRecord, MesoAccumulator, CompetencyDemonstrationLevel, MasteryComponent } from '../types';
 import { generateProbe, analyzeProbeResponse, generateQuestionSummary } from '../services/probingService';
 import { generateDetailedFeedback } from '../services/feedbackService';
+import { generateContent } from '../services/aiClient';
 import ProbingPipeline from './ProbingPipeline';
 import ProbingReport from './ProbingReport';
 import QuestionReport from './QuestionReport';
@@ -399,6 +399,14 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
     const [micTestResult, setMicTestResult] = useState<string>('');
     const [reportFormat, setReportFormat] = useState<'narrative' | 'visual' | 'digest' | 'focus'>('narrative');
     const [focusSection, setFocusSection] = useState<'star' | 'feedback' | 'coaching' | 'insights' | 'cv' | 'practice'>('star');
+
+    // Human-oversight flag mechanism (GDPR Article 22 / EU AI Act) — backend/routes/flags.ts
+    const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
+    const [showFlagModal, setShowFlagModal] = useState(false);
+    const [flagSection, setFlagSection] = useState('overall');
+    const [flagNote, setFlagNote] = useState('');
+    const [flagSubmitting, setFlagSubmitting] = useState(false);
+    const [flagResult, setFlagResult] = useState<string | null>(null);
     const [primingDone, setPrimingDone] = useState(() =>
         new URLSearchParams(window.location.search).get('preview') === 'true'
     );
@@ -434,6 +442,23 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
     });
     const prevSession = sessionHistory[sessionHistory.length - 1] ?? null;
 
+    // On mount: fetch the latest snapshot from the backend as a cross-device fallback.
+    // If localStorage is already populated (same device), we keep those entries.
+    // If localStorage is empty (new device, same email), backend fills the gap.
+    useEffect(() => {
+        const emailKey = email.trim().toLowerCase();
+        if (!emailKey) return;
+        fetch(`/api/snapshots/${encodeURIComponent(emailKey)}`)
+            .then(r => (r.ok ? r.json() : null))
+            .then((data: { snapshot: SessionSnapshot } | null) => {
+                if (!data?.snapshot) return;
+                setSessionHistory(prev => {
+                    if (prev.length > 0) return prev; // localStorage already has history — trust it
+                    return [data.snapshot];
+                });
+            })
+            .catch(() => {}); // backend unavailable — localStorage-only fallback is fine
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Demo mode: one question per type for fast testing
     const activeQuestions = React.useMemo(() => {
@@ -476,7 +501,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         phaseStartTimestamp.current = Date.now();
     }, []);
 
-    // Save session snapshot to localStorage once report is ready
+    // Save session snapshot to localStorage + backend once report is ready
     useEffect(() => {
         if (recordingStatus !== 'uploaded' || !detailedFeedback || !sessionKey) return;
         const snapshot: SessionSnapshot = {
@@ -494,6 +519,15 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
             try { localStorage.setItem(sessionKey, JSON.stringify(updated)); } catch {}
             return updated;
         });
+        // Mirror to backend so returning participants are recognised on any device
+        const emailKey = email.trim().toLowerCase();
+        if (emailKey) {
+            fetch('/api/snapshots', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ emailKey, snapshot }),
+            }).catch(() => {}); // non-fatal — localStorage write already succeeded
+        }
     }, [recordingStatus, detailedFeedback, sessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
@@ -548,8 +582,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                     let binary = '';
                     for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
                     const base64 = btoa(binary);
-                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-                    const r = await ai.models.generateContent({
+                    const r = await generateContent({
                         model: 'gemini-2.0-flash',
                         contents: [{ parts: [
                             { text: 'Transcribe this audio recording exactly as spoken. If the audio is silent or inaudible, say so clearly.' },
@@ -775,15 +808,13 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         let accumulated: Float32Array[] = [];
         let accumulatedLen = 0;
 
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
-
         const sendChunk = async (samples: Float32Array) => {
             try {
                 const wav = encodeWAV(samples, sampleRate);
                 const bytes = new Uint8Array(wav);
                 let binary = '';
                 for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-                const response = await ai.models.generateContent({
+                const response = await generateContent({
                     model: 'gemini-3-flash-preview',
                     contents: [{ role: 'user', parts: [
                         { inlineData: { data: btoa(binary), mimeType: 'audio/wav' } },
@@ -982,6 +1013,26 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 act1Analysis: act1Analysis,   // ZPD lower boundary — unprobed performance (Vygotsky 1978)
                 summaryReport: summaryReport,
             }]);
+
+            const starMap = (v: string | undefined) =>
+                v === 'complete' ? 100 : v === 'partial' ? 50 : v === 'missing' ? 0 : null;
+            const st = probeAnalysis?.star_status;
+            logEvent('question_answered', {
+                questionIndex: currentQuestionIndex,
+                questionType: currentQuestion.questionType ?? 'behavioural',
+                probeUsed: !!probeAnalysis,
+                depthDelta: probeAnalysis?.depth_delta ?? null,
+                starSituation: starMap(st?.situation),
+                starTask:      starMap(st?.task),
+                starAction:    starMap(st?.action),
+                starResult:    starMap(st?.result),
+                // Spoken response — linked only to anonymous participant ID, never to email.
+                // Basic scrub removes email addresses and phone numbers before storage.
+                responseText: newSegment
+                    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[EMAIL]')
+                    .replace(/(\+?\d[\d\s\-().]{7,}\d)/g, '[PHONE]')
+                    .trim() || null,
+            });
 
             if (isFinal) {
                 setReassuringMessage("Thank you for your patience, we are redirecting you to the final feedback report. Thanks for taking your time out to practice with Ascend.");
@@ -1278,6 +1329,19 @@ if (recordingStatus === 'recording') await handleRecord();
             // ── Wire cross-session ELC tracking: build SessionRecord from this session ──
             const scoreToLevel = (s: number): CompetencyDemonstrationLevel =>
               s >= 5 ? 'Advanced' : s >= 4 ? 'Established' : s >= 3 ? 'Developing' : 'Emerging';
+            const LEVEL_ORDER: CompetencyDemonstrationLevel[] = ['Emerging', 'Developing', 'Established', 'Advanced'];
+            const averageLevel = (levels: CompetencyDemonstrationLevel[]): CompetencyDemonstrationLevel | null => {
+              if (levels.length === 0) return null;
+              const meanIndex = levels.reduce((sum, l) => sum + LEVEL_ORDER.indexOf(l), 0) / levels.length;
+              return LEVEL_ORDER[Math.round(meanIndex)];
+            };
+            // ZPD dual boundary (Vygotsky 1978): Act 1 (unprobed) = lower boundary, post-probe = upper boundary
+            const lowerBoundaryLevel = averageLevel(
+              sessionLog.map(e => e.act1Analysis?.competency_demonstration_level).filter((l): l is CompetencyDemonstrationLevel => !!l)
+            );
+            const upperBoundaryLevel = averageLevel(
+              sessionLog.map(e => e.probeAnalysis?.competency_demonstration_level).filter((l): l is CompetencyDemonstrationLevel => !!l)
+            );
             const mt = feedback.masteryTracker;
             const starReached: MasteryComponent[] = mt
               ? (['situation', 'task', 'action', 'result'] as MasteryComponent[]).filter(c => mt[c]?.status === 'reached')
@@ -1287,6 +1351,8 @@ if (recordingStatus === 'recording') await handleRecord();
               timestamp: Date.now(),
               condition,
               competencyLevels: [scoreToLevel(feedback.rubrics?.starCompletion ?? 1)],
+              lowerBoundaryLevel,
+              upperBoundaryLevel,
               scaffoldDependencyScore: feedback.scaffoldedLearningSignal?.scaffoldDependency?.score ?? 50,
               regulatoryFocus: (candidateProfile?.regulatoryFocus as any) ?? 'unclear',
               feedbackOrientation: (candidateProfile?.seeksFeedback as any) ?? 'uncertain',
@@ -1315,7 +1381,7 @@ if (recordingStatus === 'recording') await handleRecord();
                 settings: { condition },
                 questions: activeQuestions.map(q => ({ text: q.text, competency: q.competency })),
               }),
-            }).catch(() => {});
+            }).then(r => r.json()).then(d => { if (d.sessionId) setBackendSessionId(d.sessionId); }).catch(() => {});
         } catch (err) {
             console.error("Failed to generate final feedback:", err);
         } finally {
@@ -1380,11 +1446,12 @@ if (recordingStatus === 'recording') await handleRecord();
         if (!detailedFeedback) return;
 
         const rd = detailedFeedback.rubrics;
-        const reportContent = `
-# ASCEND COHERENCE AUDIT REPORT
+
+        // Layer A only — candidate-facing. No numeric scores, no researcher-only signals.
+        const candidateReportContent = `
+# ASCEND PERFORMANCE REPORT
 Generated on: ${new Date().toLocaleString()}
 Target Role: ${targetRole} at ${companyName}
-Session ID: ${Math.random().toString(36).substring(2, 15).toUpperCase()}
 
 ## 1. EXECUTIVE SUMMARY
 ${detailedFeedback.performanceSummary}
@@ -1392,44 +1459,61 @@ ${detailedFeedback.performanceSummary}
 ## 2. OVERALL STAR SYNTHESIS
 ${detailedFeedback.overallStarSynthesis || 'N/A'}
 
-## 3. PERFORMANCE RUBRICS (1–5 Scale)
+## 3. KEY STRENGTHS
+${detailedFeedback.strengths.map(s => `+ ${s}`).join('\n')}
+
+## 4. IMPROVEMENT AREAS
+${detailedFeedback.weaknesses.map(w => `- ${w}`).join('\n')}
+
+## 5. STAR ANALYSIS
+- Situation: ${detailedFeedback.starAnalysis.situation}
+- Task:      ${detailedFeedback.starAnalysis.task}
+- Action:    ${detailedFeedback.starAnalysis.action}
+- Result:    ${detailedFeedback.starAnalysis.result}
+
+## 6. KEYWORD COVERAGE
+Found:   ${detailedFeedback.keywordCoverage.found.join(', ')}
+Missing: ${detailedFeedback.keywordCoverage.missing.join(', ')}
+
+## 7. ACTIONABLE REMEDIATION
+${detailedFeedback.actionableSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+## 8. CAREER DEVELOPMENT
+Recommended Certs: ${detailedFeedback.careerDevelopment.certifications.join(', ')}
+Next Steps:        ${detailedFeedback.careerDevelopment.nextSteps.join(', ')}
+
+---
+© ${new Date().getFullYear()} Ascend Platform. Confidential Performance Report.
+        `.trim();
+
+        // Layer B — researcher-only. Numeric rubrics, cognitive/evidence signals, ZPD, integrity audit.
+        const researcherReportContent = `
+${candidateReportContent}
+
+---
+
+# RESEARCHER APPENDIX (Layer B — not for candidate distribution)
+Session ID: ${Math.random().toString(36).substring(2, 15).toUpperCase()}
+
+## R1. PERFORMANCE RUBRICS (1–5 Scale)
 - STAR Completion:      ${rd?.starCompletion ?? 0}/5 — ${rd?.justifications?.starCompletion || ''}
 - Evidence Specificity: ${rd?.evidenceSpecificity ?? 0}/5 — ${rd?.justifications?.evidenceSpecificity || ''}
 - Role Clarity:         ${rd?.roleClarity ?? 0}/5 — ${rd?.justifications?.roleClarity || ''}
 - JD Alignment:         ${rd?.jdAlignment ?? 0}/5 — ${rd?.justifications?.jdAlignment || ''}
 - Communication:        ${rd?.confidence ?? 0}/5 — ${rd?.justifications?.confidence || ''}
 
-## 4. KEY STRENGTHS
-${detailedFeedback.strengths.map(s => `+ ${s}`).join('\n')}
-
-## 5. IMPROVEMENT AREAS
-${detailedFeedback.weaknesses.map(w => `- ${w}`).join('\n')}
-
-## 6. STAR ANALYSIS
-- Situation: ${detailedFeedback.starAnalysis.situation}
-- Task:      ${detailedFeedback.starAnalysis.task}
-- Action:    ${detailedFeedback.starAnalysis.action}
-- Result:    ${detailedFeedback.starAnalysis.result}
-
-## 7. KEYWORD COVERAGE
-Found:   ${detailedFeedback.keywordCoverage.found.join(', ')}
-Missing: ${detailedFeedback.keywordCoverage.missing.join(', ')}
-
-## 8. ACTIONABLE REMEDIATION
-${detailedFeedback.actionableSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
-
-## 9. KOLB ELC STAGE SIGNALS (Process Overlap Theory — Kovacs & Conway, 2016)
+## R2. KOLB ELC STAGE SIGNALS (Process Overlap Theory — Kovacs & Conway, 2016)
 ${detailedFeedback.chcCognitiveDimensions ? `- Abstract Conceptualisation: ${detailedFeedback.chcCognitiveDimensions.abstractConceptualisation?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.abstractConceptualisation?.evidenceBasis || ''}
 - Active Experimentation:     ${detailedFeedback.chcCognitiveDimensions.activeExperimentation?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.activeExperimentation?.evidenceBasis || ''}
 - Concrete Experience:        ${detailedFeedback.chcCognitiveDimensions.concreteExperience?.score ?? 'N/A'}/100 — ${detailedFeedback.chcCognitiveDimensions.concreteExperience?.evidenceBasis || ''}
 Note: ${detailedFeedback.chcCognitiveDimensions.overallELCNote || 'N/A'}` : 'ELC stage signal data unavailable.'}
 
-## 10. BEHAVIORAL EVIDENCE VECTORS (Levashina & Campion 2007; Ericsson 2016)
+## R3. BEHAVIORAL EVIDENCE VECTORS (Levashina & Campion 2007; Ericsson 2016)
 ${detailedFeedback.meritVectors ? `- Personal Agency:      ${detailedFeedback.meritVectors.personalAgency.score}/100 — ${detailedFeedback.meritVectors.personalAgency.evidenceBasis}
 - Skill Specificity:   ${detailedFeedback.meritVectors.skillSpecificity.score}/100 — ${detailedFeedback.meritVectors.skillSpecificity.evidenceBasis}
 - Impact Articulation: ${detailedFeedback.meritVectors.impactArticulation.score}/100 — ${detailedFeedback.meritVectors.impactArticulation.evidenceBasis}` : 'Evidence vector data unavailable.'}
 
-## 11. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
+## R4. PROFESSIONAL SELF-VERIFICATION SIGNALS (Cable & Kay, 2012)
 ${detailedFeedback.professionalSelfVerificationSignals ? `- Voice (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.voice?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.voice?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.voice?.evidenceBasis || ''}
 - Motivation (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.motivation?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.motivation?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.motivation?.evidenceBasis || ''}
 - Explanation (Self-Verifying): ${detailedFeedback.professionalSelfVerificationSignals.explanation?.score ?? 'N/A'}/100 [${detailedFeedback.professionalSelfVerificationSignals.explanation?.orientation}] — ${detailedFeedback.professionalSelfVerificationSignals.explanation?.evidenceBasis || ''}
@@ -1437,32 +1521,27 @@ ${detailedFeedback.professionalSelfVerificationSignals ? `- Voice (Self-Verifyin
 - Fit Signal: ${detailedFeedback.professionalSelfVerificationSignals.fitSignal || 'N/A'}
 - Feedback Implication: ${detailedFeedback.professionalSelfVerificationSignals.feedbackImplication || 'N/A'}` : 'Professional Self-Verification Signals data unavailable.'}
 
-## 12. SCAFFOLDED LEARNING (Vygotsky, 1978)
+## R5. SCAFFOLDED LEARNING (Vygotsky, 1978)
 ${detailedFeedback.scaffoldedLearningSignal ? `- ZPD Observation: ${detailedFeedback.scaffoldedLearningSignal.zpdProgressionObservation || 'N/A'}
 - Dependency: ${detailedFeedback.scaffoldedLearningSignal.scaffoldDependency?.interpretation || 'N/A'}
 - Lower Boundary: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.lowerBoundary || 'N/A'}
 - Upper Boundary: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.upperBoundary || 'N/A'}
 - Dev Gap: ${detailedFeedback.scaffoldedLearningSignal.zoneOfProximalDevelopmentEstimate?.developmentGap || 'N/A'}` : 'Vygotsky data unavailable.'}
 
-## 13. CAREER DEVELOPMENT
-Recommended Certs: ${detailedFeedback.careerDevelopment.certifications.join(', ')}
-Next Steps:        ${detailedFeedback.careerDevelopment.nextSteps.join(', ')}
-
-## 14. RESEARCH SIGNALS
+## R6. RESEARCH SIGNALS
 - AI Trust Calibration: ${detailedFeedback.algorithmicAversionSignal?.aversionDetected ? 'Scepticism detected' : 'No scepticism detected'} — ${detailedFeedback.algorithmicAversionSignal?.aversionEvidence || 'No evidence.'}
 - Social Identity:     ${detailedFeedback.socialIdentityAwareness?.activated ? `Active (${detailedFeedback.socialIdentityAwareness.dominantMotivation || 'Balanced'})` : 'Inactive'} — ${detailedFeedback.socialIdentityAwareness?.scopeNote}
 
-## 15. INTEGRITY & SAFETY AUDIT
+## R7. INTEGRITY & SAFETY AUDIT
 Violation Detected: ${detailedFeedback.integrityViolation?.detected ? 'YES' : 'NO'}
 ${detailedFeedback.integrityViolation?.detected ? `Note: ${detailedFeedback.integrityViolation.note}` : ''}
 Bias & Fairness: ${typeof detailedFeedback.biasAndFairnessNote === 'string' ? detailedFeedback.biasAndFairnessNote : (detailedFeedback.biasAndFairnessNote as any)?.overallFairnessNote || 'See full report.'}
 
-## 16. INTERVIEW TRANSCRIPT
+## R8. INTERVIEW TRANSCRIPT
 ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.maskedTranscript as any)?.text : detailedFeedback.maskedTranscript || transcript}
-
----
-© ${new Date().getFullYear()} Ascend Platform. Confidential Performance Intelligence Report.
         `.trim();
+
+        const reportContent = researcherMode ? researcherReportContent : candidateReportContent;
 
         const blob = new Blob([reportContent], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
@@ -1473,6 +1552,33 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    };
+
+    const handleSubmitFlag = async () => {
+        if (!backendSessionId) {
+            setFlagResult('Report not yet saved — please wait a moment and try again.');
+            return;
+        }
+        setFlagSubmitting(true);
+        setFlagResult(null);
+        try {
+            const res = await fetch(`/api/sessions/${encodeURIComponent(backendSessionId)}/flags`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ participantId, section: flagSection, candidateNote: flagNote.trim() || undefined }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setFlagResult(data.message ?? 'Your feedback has been recorded and will be reviewed.');
+                setFlagNote('');
+            } else {
+                setFlagResult(data.error ?? 'Failed to submit — please try again.');
+            }
+        } catch {
+            setFlagResult('Failed to submit — please try again.');
+        } finally {
+            setFlagSubmitting(false);
+        }
     };
 
 
@@ -1582,7 +1688,13 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                         />
 
                         <button
-                            onClick={() => setReflectionDone(true)}
+                            onClick={() => {
+                                logEvent('reflection_submitted', {
+                                    completed: !!reflectionText.trim(),
+                                    textLength: reflectionText.trim().length,
+                                });
+                                setReflectionDone(true);
+                            }}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-indigo-900/40"
                         >
                             {reflectionText.trim() ? 'Continue →' : 'Skip for now →'}
@@ -1643,14 +1755,26 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                         </div>
 
                         <button
-                            onClick={() => setSelfRatingDone(true)}
+                            onClick={() => {
+                                logEvent('self_rating_submitted', {
+                                    completed: true,
+                                    selfRatingSituation: selfRating.situation,
+                                    selfRatingTask:      selfRating.task,
+                                    selfRatingAction:    selfRating.action,
+                                    selfRatingResult:    selfRating.result,
+                                });
+                                setSelfRatingDone(true);
+                            }}
                             disabled={!allRated}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-black text-sm uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-indigo-900/20"
                         >
                             {allRated ? 'See My Results →' : 'Rate all four to continue'}
                         </button>
                         <button
-                            onClick={() => setSelfRatingDone(true)}
+                            onClick={() => {
+                                logEvent('self_rating_submitted', { completed: false });
+                                setSelfRatingDone(true);
+                            }}
                             className="w-full mt-3 py-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
                         >
                             Skip
@@ -1720,8 +1844,66 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 </svg>
                                 {micTestState === 'recording' ? 'Recording 5s…' : micTestState === 'done' ? 'Audio ✓ Test Again' : micTestState === 'error' ? 'Mic Error — Retry' : 'Test Audio'}
                             </button>
+                            <button
+                                onClick={() => { setShowFlagModal(true); setFlagResult(null); }}
+                                className="px-8 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[11px] flex items-center gap-3 hover:bg-slate-50 transition-all active:scale-95"
+                            >
+                                <ShieldAlert size={18} /> Flag an Issue
+                            </button>
                         </div>
                     </div>
+
+                    {showFlagModal && (
+                        <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" role="dialog" aria-modal="true">
+                            <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full border border-slate-200">
+                                <h2 className="text-lg font-black text-slate-900 tracking-tight mb-1">Flag This Report</h2>
+                                <p className="text-xs text-slate-500 font-medium mb-6">Think a section of your feedback is inaccurate or unfair? Flag it — a human will review it. This does not change your report automatically.</p>
+
+                                {flagResult ? (
+                                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm font-medium text-emerald-800 mb-6">{flagResult}</div>
+                                ) : (
+                                    <>
+                                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Which section?</label>
+                                        <select
+                                            value={flagSection}
+                                            onChange={e => setFlagSection(e.target.value)}
+                                            className="w-full mb-4 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 focus:outline-none focus:border-indigo-400"
+                                        >
+                                            <option value="overall">Overall report</option>
+                                            <option value="strengths">Strengths</option>
+                                            <option value="weaknesses">Improvement areas</option>
+                                            <option value="star_analysis">STAR analysis</option>
+                                            <option value="coaching">Coaching suggestions</option>
+                                            <option value="rubrics">Scores / ratings</option>
+                                        </select>
+                                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">What's wrong? (optional)</label>
+                                        <textarea
+                                            value={flagNote}
+                                            onChange={e => setFlagNote(e.target.value)}
+                                            rows={4}
+                                            placeholder="Tell us what seems off…"
+                                            className="w-full mb-6 px-4 py-3 rounded-2xl border border-slate-200 text-sm font-medium text-slate-700 placeholder:text-slate-300 focus:outline-none focus:border-indigo-400 resize-none"
+                                        />
+                                    </>
+                                )}
+
+                                <div className="flex flex-col gap-3">
+                                    {!flagResult && (
+                                        <button
+                                            onClick={handleSubmitFlag}
+                                            disabled={flagSubmitting}
+                                            className="w-full py-4 rounded-2xl font-black text-white bg-slate-900 hover:bg-indigo-600 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all uppercase tracking-[0.2em] text-xs"
+                                        >
+                                            {flagSubmitting ? 'Submitting…' : 'Submit Flag'}
+                                        </button>
+                                    )}
+                                    <button onClick={() => setShowFlagModal(false)} className="w-full py-3 rounded-2xl font-black text-slate-500 hover:text-slate-800 transition-colors text-xs uppercase tracking-widest">
+                                        {flagResult ? 'Close' : 'Cancel'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Preview mode banner */}
                     {previewMode && (
@@ -1805,7 +1987,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         <option value="star">STAR Analysis</option>
                                         <option value="feedback">Strengths & Weaknesses</option>
                                         <option value="coaching">Coaching & Suggestions</option>
-                                        <option value="insights">Research Insights</option>
+                                        {researcherMode && <option value="insights">Research Insights</option>}
                                         <option value="cv">CV Alignment</option>
                                         <option value="practice">Practice Tasks</option>
                                     </select>
@@ -2183,8 +2365,8 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </div>
                                 </section>
 
-                                {/* STAR Mastery Progress — candidate-facing */}
-                                {detailedFeedback.masteryTracker && (
+                                {/* STAR Mastery Progress — researcher-only (FRAMEWORK.md §9.2) */}
+                                {researcherMode && detailedFeedback.masteryTracker && (
                                     <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
                                             <CheckCircle2 size={16} /> STAR Component Progress
@@ -3016,8 +3198,8 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     ))}
                                 </div>
                             </section>
-                            {/* Rubric bars */}
-                            <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                            {/* Rubric bars — researcher-only, raw numeric scores (FRAMEWORK.md §3.2 Tier 1) */}
+                            {researcherMode && <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Performance Scores</p>
                                 <div className="space-y-5">
                                     {([
@@ -3040,7 +3222,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         </div>
                                     ))}
                                 </div>
-                            </section>
+                            </section>}
                             {/* Strengths & Weaknesses cards */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <section className="bg-emerald-50 p-6 rounded-[32px] border border-emerald-200 space-y-4">
@@ -3086,8 +3268,8 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     })}
                                 </section>
                             </div>
-                            {/* Merit vectors bars */}
-                            {detailedFeedback.meritVectors && (
+                            {/* Merit vectors bars — researcher-only, raw numeric scores (FRAMEWORK.md §3.2 Tier 1) */}
+                            {researcherMode && detailedFeedback.meritVectors && (
                                 <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-6">Behavioural Evidence Signals</p>
                                     <div className="space-y-4">
@@ -3157,7 +3339,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                             {/* At-a-glance header */}
                             <div className="p-6 bg-slate-900 rounded-[32px] border border-indigo-500/20">
                                 <p className="text-[9px] font-black uppercase tracking-widest text-indigo-400 mb-4">Session At a Glance</p>
-                                <div className="grid grid-cols-5 gap-3 mb-4">
+                                {researcherMode && <div className="grid grid-cols-5 gap-3 mb-4">
                                     {([
                                         { label: 'STAR', score: detailedFeedback.rubrics.starCompletion },
                                         { label: 'Evidence', score: detailedFeedback.rubrics.evidenceSpecificity },
@@ -3170,7 +3352,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                             <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">{r.label}</div>
                                         </div>
                                     ))}
-                                </div>
+                                </div>}
                                 <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Priority</p>
                                 <p className="text-sm font-bold text-white leading-relaxed">{detailedFeedback.meritVectors?.primarySuggestionAnchor ?? detailedFeedback.actionableSuggestions[0]}</p>
                             </div>
@@ -3385,7 +3567,7 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     )}
                                 </section>
                             )}
-                            {focusSection === 'insights' && detailedFeedback.meritVectors && (
+                            {focusSection === 'insights' && researcherMode && detailedFeedback.meritVectors && (
                                 <section className="space-y-6">
                                     <div className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
                                         <div className="flex items-center gap-3 mb-6">

@@ -1,11 +1,7 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { generateContent } from "./aiClient";
 import { DetailedFeedback, MesoAccumulator, MasteryComponent } from "../types";
-
-const getAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  return new GoogleGenAI({ apiKey });
-};
 
 export interface GenerateFeedbackParams {
   transcript: string;
@@ -29,7 +25,6 @@ export interface GenerateFeedbackParams {
 export const generateDetailedFeedback = async (
   params: GenerateFeedbackParams
 ): Promise<DetailedFeedback> => {
-  const ai = getAI();
   const model = "gemini-3-flash-preview";
 
 
@@ -208,7 +203,7 @@ ABSOLUTE RULES ACROSS ALL LEVELS:
   // LAYER A & B: TRIGGER FINAL FEEDBACK GEN
   // ==========================================
   try {
-    const response = await ai.models.generateContent({
+    const response = await generateContent({
       model,
       contents: [{
         role: 'user',
@@ -647,7 +642,7 @@ explanation: {
 
 dominantMode: 'self_verifying' | 'impression_managing' | 'mixed',
 // Which pattern showed up most across all three?
-// Mixed only if genuinely split — not as a default.
+// Mixed only if genuinely split, not as a default.
 
 fitSignal: string,
 // One sentence in plain English.
