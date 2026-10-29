@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "latest",
+    "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.0.0-alpha.25",
     "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.6",

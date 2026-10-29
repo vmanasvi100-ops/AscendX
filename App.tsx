@@ -6,16 +6,20 @@ import WelcomeScreen from './components/WelcomeScreen';
 
 import TourGuide from './components/TourGuide';
 import ProductDashboard from './components/ProductDashboard';
+import SupportSettings from './components/SupportSettings';
+import ReflectionLibrary from './components/ReflectionLibrary';
 import { tourSteps } from './data';
 import type { AnalyticsEvent, AnalyticsEventType } from './types';
+import { saveCvAlignment } from './services/cvAlignment';
 
 type AppState = 'welcome' | 'profiling' | 'interview';
 
 const HardwareConsentModal = ({ onAllow, onClose, error, emailError, isLoading, email, onEmailChange, ndaAccepted, onNdaChange }: { onAllow: () => void; onClose: () => void; error: string | null; emailError: string | null; isLoading: boolean; email: string; onEmailChange: (v: string) => void; ndaAccepted: boolean; onNdaChange: (v: boolean) => void; }) => {
   const [cameraConsent, setCameraConsent] = useState(false);
   const [micConsent, setMicConsent] = useState(false);
+  const [termsConsent, setTermsConsent] = useState(false);
 
-  const canProceed = cameraConsent && micConsent && ndaAccepted && email.trim().includes('@');
+  const canProceed = cameraConsent && micConsent && ndaAccepted && termsConsent && email.trim().includes('@');
 
   return (
     <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" aria-modal="true" role="dialog">
@@ -91,6 +95,21 @@ const HardwareConsentModal = ({ onAllow, onClose, error, emailError, isLoading, 
                     </span>
                 </div>
             </label>
+            <label className="flex items-start gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
+                <input
+                    type="checkbox"
+                    checked={termsConsent}
+                    onChange={(e) => setTermsConsent(e.target.checked)}
+                    className="mt-1 w-5 h-5 accent-blue-600"
+                />
+                <div className="flex-1">
+                    <span className="block font-black text-slate-900 text-sm uppercase tracking-widest">Terms & Data Processing</span>
+                    <span className="text-xs text-slate-500">
+                        I agree to AscendX's terms of use and consent to my session audio/video and responses being processed by this platform
+                        — including by the third-party AI model provider used to generate feedback — for the purpose of interview coaching.
+                    </span>
+                </div>
+            </label>
         </div>
 
         {error && (
@@ -141,16 +160,70 @@ const AppContent: React.FC = () => {
     condition,
     setIsPredictiveActive,
     setFinishSessionTrigger,
+    mesoAccumulator,
+    saveMesoAccumulator,
+    computeMesoDelta,
+    clearModeEnabled,
+    setClearModeEnabled,
+    clearModeAppearance,
+    setClearModeAppearance,
+    saveClips,
+    setSaveClips,
+    voiceGenderPreference,
+    setVoiceGenderPreference,
+    voiceTone,
+    setVoiceTone,
+    aiTutorVoiceMode,
+    setAiTutorVoiceMode,
+    visualExplanationsTrigger,
+    setVisualExplanationsTrigger,
+    visualFeedback,
+    setVisualFeedback,
+    setDyslexiaFont,
+    jdcvAlignmentAnalysis,
+    companyName,
+    targetRole,
+    jobDescription,
   } = useSettings();
   const [appState, setAppState] = useState<AppState>(() =>
     new URLSearchParams(window.location.search).get('preview') === 'true' ? 'interview' : 'welcome'
   );
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+  const [isSupportSettingsOpen, setIsSupportSettingsOpen] = useState(false);
+  const [isReflectionLibraryOpen, setIsReflectionLibraryOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isCheckingPermission, setIsCheckingPermission] = useState(false);
   const [candidateEmail, setCandidateEmail] = useState('');
+  const [consentId, setConsentId] = useState<string | null>(null);
   const [ndaAccepted, setNdaAccepted] = useState(false);
+
+  // Gives the CV/JD alignment analysis (computed once, in WelcomeScreen's Phase 2) a durable
+  // backend home instead of leaving it only in this tab's React context — see
+  // backend/FRAMEWORK.md for why that was fragile (lost on refresh, racy against Phase 2's own
+  // async resolution). The analysis and the candidate's email become available on separate,
+  // loosely-timed paths (Phase 2 runs in WelcomeScreen; email is typed into the consent modal
+  // that opens over it), so this just watches for both and saves once either arrives second.
+  // savedForRef guards against re-saving the same analysis on every unrelated re-render.
+  const savedCvAlignmentForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const email = candidateEmail.trim().toLowerCase();
+    if (!email || !jdcvAlignmentAnalysis) return;
+    const key = `${email}:${jdcvAlignmentAnalysis.alignmentSummary ?? ''}`;
+    if (savedCvAlignmentForRef.current === key) return;
+    savedCvAlignmentForRef.current = key;
+    saveCvAlignment({
+      email,
+      participantId,
+      companyName: companyName || null,
+      targetRole: targetRole || null,
+      jobDescription: jobDescription || null,
+      alignmentSummary: jdcvAlignmentAnalysis.alignmentSummary || null,
+      strengthAreas: jdcvAlignmentAnalysis.strengthAreas?.map(s => ({
+        area: s.area, cvEvidence: s.cvEvidence, jdRequirement: s.jdRequirement,
+      })) || null,
+    });
+  }, [candidateEmail, jdcvAlignmentAnalysis, companyName, targetRole, jobDescription]);
 
   // Analytics State
   const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>(() => {
@@ -246,6 +319,48 @@ const AppContent: React.FC = () => {
       // Backend unavailable — don't block the participant.
     }
 
+    // Record product-use/audio-processing/third-party consent server-side — the checkboxes
+    // above (camera/mic/terms) are the genuine basis for each of these; canProceed already
+    // guarantees all three were checked before this function runs. Non-blocking: a backend
+    // hiccup here shouldn't stop a candidate who already gave consent from starting their session.
+    fetch('/api/consent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantId, productUse: true, audioProcessing: true, thirdParty: true }),
+    }).then(r => r.json()).then(d => { if (d.consentId) setConsentId(d.consentId); }).catch(() => {});
+
+    // Reconstruct cross-session history from the backend, keyed by email (stable across
+    // devices) rather than participantId (fresh per browser tab/device). Without this, a
+    // candidate returning on a new device or a cleared cache would silently lose all
+    // cross-session coaching and look like a first-session candidate. Merges with whatever
+    // localStorage already has — dedup by sessionId, backend wins on conflict since it's
+    // the more durable copy — rather than overwriting local history outright.
+    const emailKey = candidateEmail.trim().toLowerCase();
+    if (emailKey) {
+      fetch(`/api/sessions/by-email/${encodeURIComponent(emailKey)}/history`)
+        .then(r => r.ok ? r.json() : { sessions: [] })
+        .then(({ sessions: backendSessions }) => {
+          const remoteRecords = (backendSessions ?? [])
+            .map((s: any) => s.meso_record)
+            .filter((r: any) => r && r.sessionId);
+          if (remoteRecords.length === 0) return;
+
+          const localRecords = mesoAccumulator?.sessions ?? [];
+          const merged = new Map<string, typeof remoteRecords[number]>();
+          localRecords.forEach(r => merged.set(r.sessionId, r));
+          remoteRecords.forEach((r: any) => merged.set(r.sessionId, r)); // backend wins on conflict
+          const mergedSessions = Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+          saveMesoAccumulator({
+            participantId,
+            sessions: mergedSessions,
+            delta: computeMesoDelta(mergedSessions),
+            lastUpdated: Date.now(),
+          });
+        })
+        .catch(() => { /* backend unavailable — fall back silently to whatever localStorage has */ });
+    }
+
     try {
         let stream: MediaStream;
         try {
@@ -318,8 +433,42 @@ const AppContent: React.FC = () => {
 
   return (
     <div className={`min-h-screen w-screen overflow-x-hidden bg-slate-100 text-slate-800 font-sans antialiased ${dyslexiaFont ? 'font-dyslexia-friendly' : ''}`}>
-      {appState === 'welcome' && <WelcomeScreen onStart={startInterview} logEvent={logEvent} />}
-      {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} email={candidateEmail} />}
+      {appState === 'welcome' && (
+        <WelcomeScreen
+          onStart={startInterview}
+          logEvent={logEvent}
+          onOpenSupportSettings={() => setIsSupportSettingsOpen(true)}
+        />
+      )}
+      {appState === 'interview' && <AscendPlatform logEvent={logEvent} onExit={handleExitInterview} email={candidateEmail} consentId={consentId} />}
+
+      {isSupportSettingsOpen && (
+        <SupportSettings
+          clearModeEnabled={clearModeEnabled}
+          onClearModeEnabledChange={setClearModeEnabled}
+          clearModeAppearance={clearModeAppearance}
+          onClearModeAppearanceChange={setClearModeAppearance}
+          saveClips={saveClips}
+          onSaveClipsChange={setSaveClips}
+          voiceGenderPreference={voiceGenderPreference}
+          onVoiceGenderPreferenceChange={setVoiceGenderPreference}
+          voiceTone={voiceTone}
+          onVoiceToneChange={setVoiceTone}
+          aiTutorVoiceMode={aiTutorVoiceMode}
+          onAiTutorVoiceModeChange={setAiTutorVoiceMode}
+          visualExplanationsTrigger={visualExplanationsTrigger}
+          onVisualExplanationsTriggerChange={setVisualExplanationsTrigger}
+          lowStimulation={visualFeedback === 'minimalist'}
+          onLowStimulationChange={(enabled) => setVisualFeedback(enabled ? 'minimalist' : 'gentle')}
+          dyslexiaFont={dyslexiaFont}
+          onDyslexiaFontChange={setDyslexiaFont}
+          onClose={() => setIsSupportSettingsOpen(false)}
+        />
+      )}
+
+      {isReflectionLibraryOpen && (
+        <ReflectionLibrary onClose={() => setIsReflectionLibraryOpen(false)} />
+      )}
 
       {showProductDashboard && (
         <ProductDashboard

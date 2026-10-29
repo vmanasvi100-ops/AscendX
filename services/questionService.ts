@@ -234,12 +234,24 @@ export const generateJDCVAlignmentQuestions = async (
   targetRole: string,
   companyName: string
 ): Promise<{ questions: Question[]; analysis: JDCVAlignmentAnalysis | null }> => {
-  // Both CV and JD must be present — without a JD there are no stated requirements to measure against
-  if (!cvText.trim()) return { questions: [], analysis: null };
-  if (!jobDescription.trim()) return { questions: [], analysis: null };
+  // Both CV and JD must be present — without a JD there are no stated requirements to measure against.
+  // Every early return below is logged — this function silently returning analysis: null, with no
+  // trace anywhere, was the actual root cause of a real "the CV grounding is doing nothing"
+  // report once (see backend/FRAMEWORK.md §10m): a short but entirely real JD failed the quality
+  // gate below with zero visible explanation anywhere, in the UI or the console.
+  if (!cvText.trim()) {
+    console.warn('[JD-CV alignment] Skipped: no CV text provided.');
+    return { questions: [], analysis: null };
+  }
+  if (!jobDescription.trim()) {
+    console.warn('[JD-CV alignment] Skipped: no job description provided.');
+    return { questions: [], analysis: null };
+  }
 
-  // JD quality gate: reject random characters / keyboard mashing
-  // Requires at least 8 distinct words AND at least one recognisable JD signal word
+  // JD quality gate: reject random characters / keyboard mashing, not short-but-real job posts.
+  // Was previously 8 distinct words — too strict: "Junior Data Analyst - SQL and Excel required."
+  // is a perfectly real, short JD and only has 7. Lowered to 5, kept alongside the signal-word
+  // check (which already does most of the real filtering against gibberish on its own).
   const jdWords = jobDescription.trim().toLowerCase().match(/\b[a-z]{2,}\b/g) || [];
   const distinctJdWords = new Set(jdWords);
   const JD_SIGNAL_WORDS = new Set([
@@ -250,7 +262,12 @@ export const generateJDCVAlignmentQuestions = async (
     'communicate', 'collaborate', 'deliver', 'drive', 'build', 'ensure', 'provide',
   ]);
   const hasSignalWord = jdWords.some(w => JD_SIGNAL_WORDS.has(w));
-  if (distinctJdWords.size < 8 || !hasSignalWord) {
+  if (distinctJdWords.size < 5 || !hasSignalWord) {
+    console.warn(
+      `[JD-CV alignment] Skipped: job description failed the quality gate ` +
+      `(${distinctJdWords.size} distinct words, signal word ${hasSignalWord ? 'found' : 'NOT found'}). ` +
+      `JD was: "${jobDescription.slice(0, 200)}"`
+    );
     return { questions: [], analysis: null };
   }
   const prompt = `
@@ -311,9 +328,12 @@ Return ONLY the JSON object. No markdown, no explanation.
     const parsed = JSON.parse(response.text || '{}');
     const questions = parseQuestions(JSON.stringify(parsed.questions || []), 'jdcv', 'JD-CV alignment');
     const analysis: JDCVAlignmentAnalysis | null = parsed.analysis || null;
+    if (!analysis) {
+      console.warn('[JD-CV alignment] Model response had no "analysis" field — Talk It Through will get no CV grounding this session. Raw response:', response.text?.slice(0, 500));
+    }
     return { questions, analysis };
   } catch (err) {
-    console.error('Failed to generate JD-CV alignment:', err);
+    console.error('[JD-CV alignment] Generation failed — Talk It Through will get no CV grounding this session:', err);
     return { questions: [], analysis: null };
   }
 };

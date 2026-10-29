@@ -4,12 +4,13 @@ import { Wand2, ShieldAlert, FileUp, FileCheck, Loader2 } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
-import type { TimerFramingCondition, AnalyticsEventType, Question, RubricCriterion } from '../types';
+import type { TimerFramingCondition, AnalyticsEventType, Question } from '../types';
 import GuidedCoachMark from './GuidedCoachMark';
-import ResumeCoach from './ResumeCoach';
 import { extractAnonymizedMetadata } from '../utils/anonymizeCV';
 import { generateInitialQuestions, generateJDCVAlignmentQuestions, generateCVCompetencyQuestions, generateJDUnderstandingQuestions } from '../services/questionService';
 import { QUESTION_REPOSITORY } from '../services/questionBank';
+import { saveCvAlignment } from '../services/cvAlignment';
+import { saveCvFile, fileToBase64 } from '../services/cvFileUpload';
 
 // Set worker path for PDF.js (must be after all imports)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -17,13 +18,8 @@ console.log("debugging deployment");
 interface WelcomeScreenProps {
     onStart: () => void;
     logEvent: (type: AnalyticsEventType, metadata?: Record<string, any>) => void;
+    onOpenSupportSettings: () => void;
 }
-
-const DEFAULT_AUDIT_CRITERIA: RubricCriterion[] = [
-    { id: 'impact', label: 'Quantifiable Merit Impact', weight: 40 },
-    { id: 'alignment', label: 'Role-Specific Narrative Alignment', weight: 30 },
-    { id: 'structure', label: 'ATS/Structural Integrity', weight: 30 }
-];
 
 const HELP_CONTENT: Record<string, { text: string }> = {
     'timer-display': { text: "Choose a time awareness tool that fits your preference for tracking session duration and phase targets." },
@@ -31,6 +27,7 @@ const HELP_CONTENT: Record<string, { text: string }> = {
     'sensory-prefs': { text: "Customize interface visuals to ensure a predictable and low-stimulation environment." },
     'motivation': { text: "Enable discrete markers of progress to track session milestones." },
     'accessibility': { text: "Enable structural font adjustments to improve legibility and reduce visual fatigue." },
+    'support-and-clips': { text: "Save your own answer clips to review later, and open the full Support settings page for voice, Clear Mode and other preferences — all optional, changeable any time." },
     'predictive-engine': { text: "Uses the Triarchic Merit Model (Autonomy, Competence, Relatedness) and Bloom's Taxonomy to map Magnitude Gaps and predict friction points." },
     'standard-jd': { text: "Input a Job Description to generate a set of standard practice questions tailored to the specific requirements of the role." }
 };
@@ -69,16 +66,16 @@ const SpeakerIcon = () => (
     </svg>
 );
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent, onOpenSupportSettings }) => {
     const {
         dyslexiaFont, setDyslexiaFont,
         audioCues, setAudioCues,
+        saveClips, setSaveClips,
+        participantId,
         coachMarkTheme,
         speechRate,
         startTour,
         setActiveQuestions,
-        isPredictiveActive,
-        setIsPredictiveActive,
         cvText,
         setCvText,
         timerFramingCondition,
@@ -95,19 +92,42 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         setJdcvAlignmentAnalysis,
         preSessionAnswer,
         setPreSessionAnswer,
+        mesoAccumulator,
     } = useSettings();
 
-    const [priorSessionHint, setPriorSessionHint] = useState<string | null>(null);
+    // Your Participant ID — a durable per-device identifier (now localStorage-backed, see
+    // SettingsContext.tsx) used instead of email to link a returning candidate's CV/JD alignment
+    // and saved progress, with no per-session cost (no MX-verification call, no typing an email
+    // each time). Shown here so the candidate can copy it down, and can paste a different one
+    // back in if they want to pick up the same identity on another device/browser.
+    const [idCopied, setIdCopied] = useState(false);
+    const [showSwitchId, setShowSwitchId] = useState(false);
+    const [switchIdDraft, setSwitchIdDraft] = useState('');
+    const handleCopyId = () => {
+        navigator.clipboard?.writeText(participantId).then(() => {
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 2000);
+        }).catch(() => {});
+    };
+    const handleSwitchId = () => {
+        const next = switchIdDraft.trim();
+        if (!next) return;
+        localStorage.setItem('ascend_active_pid', next);
+        window.location.reload();
+    };
 
-    useEffect(() => {
-        try {
-            const raw = localStorage.getItem('ascend_session_history');
-            if (raw) {
-                const history: Array<{ date: string; hint: string }> = JSON.parse(raw);
-                if (history.length > 0) setPriorSessionHint(history[0].hint);
-            }
-        } catch { /* ignore */ }
-    }, []);
+    // Pulled from the last real session's forward-orientation note (the same data
+    // MesoAccumulator/computeMesoDelta already track), not the old 'ascend_session_history'
+    // key — that one was never written to anywhere, so this hint has been dead since
+    // before cross-session tracking existed. mesoAccumulator is enriched with backend
+    // history (by email) once a candidate completes hardware consent, so this also
+    // benefits from cross-device reconstruction on return visits.
+    const priorSessionHint = (() => {
+        const sessions = mesoAccumulator?.sessions;
+        if (!sessions || sessions.length === 0) return null;
+        const lastSession = sessions[sessions.length - 1];
+        return lastSession.forwardOrientationNotes.slice(-1)[0] ?? null;
+    })();
 
     const [isHoverAudioActive, setIsHoverAudioActive] = useState(false);
     const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -192,6 +212,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         speak(e.currentTarget.textContent || '');
     };
 
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const DOC_MIME = 'application/msword';
+    const ACCEPTED_CV_MIME_TYPES = new Set(['application/pdf', DOCX_MIME, DOC_MIME]);
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -200,14 +224,35 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
             setGenerationError("File too large. Please upload a CV under 5MB.");
             return;
         }
-        if (file.type !== 'application/pdf') {
-            setGenerationError("Please upload a valid PDF file.");
+        if (!ACCEPTED_CV_MIME_TYPES.has(file.type)) {
+            setGenerationError("Please upload a PDF or Word (.docx) file.");
             return;
         }
 
         setPdfFileName(file.name);
         setIsExtractingPdf(true);
         setGenerationError(null);
+
+        // Saved to the backend immediately, regardless of what happens with text extraction below
+        // — an append-only record of the actual file uploaded (see services/cvFileUpload.ts and
+        // 013_cv_file_uploads.sql), independent of whether PDF text extraction succeeds, whether
+        // the candidate goes on to click "Generate Questions," or anything else downstream.
+        fileToBase64(file).then(fileBase64 => {
+            saveCvFile({ participantId, fileName: file.name, fileMime: file.type, fileBase64 });
+        }).catch(err => console.error('Failed to read file for backend save:', err));
+
+        const isWord = file.type === DOCX_MIME || file.type === DOC_MIME;
+        if (isWord) {
+            // Word text extraction isn't implemented (would need a parsing library this project
+            // doesn't currently depend on) — the file itself is still saved above, just without
+            // feeding cvText. Honest about the limitation rather than silently doing nothing:
+            // alignment/example-grounding features need cvText, so they won't activate from a
+            // Word upload yet. A PDF of the same CV would get full text extraction.
+            setCvText('');
+            setGenerationError("Your Word CV has been saved. For personalised examples (reading your actual CV content), a PDF works best right now — Word text extraction isn't available yet.");
+            setIsExtractingPdf(false);
+            return;
+        }
 
         try {
             const arrayBuffer = await file.arrayBuffer();
@@ -247,6 +292,22 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         }
         setIsGeneratingQuestions(true);
         setGenerationError(null);
+
+        // Save the raw CV/JD to the backend right now, before anything else — keyed by
+        // participantId (available immediately, no timing race against the candidate's email,
+        // which is only captured later in the consent modal). This guarantees something durable
+        // exists even if Phase 2's alignment call below fails, is slow, or the candidate never
+        // reaches the consent modal — closing the gap where cvText was wiped from memory for
+        // privacy (below) without ever having reached the backend first. Fire-and-forget: never
+        // blocks question generation.
+        saveCvAlignment({
+            participantId,
+            companyName: companyName || null,
+            targetRole: targetRole || null,
+            jobDescription: jobDescription || null,
+            cvText: cvText || null,
+        });
+
         try {
             // Phase 0: Repository questions — instant, no API
             const phase0 = QUESTION_REPOSITORY;
@@ -315,12 +376,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
         onStart();
     };
 
-    const handleInitiatePractice = (questions: Question[]) => {
-        logEvent('session_start', { mode: 'predictive_alignment' });
-        setActiveQuestions(questions);
-        onStart();
-    };
-
     return (
         <div className="min-h-screen w-full flex items-center justify-center bg-slate-100 p-4 sm:p-6 md:p-8 animate-fade-in-scale">
             <div className="w-full max-w-4xl mx-auto bg-white rounded-xl shadow-lg border border-slate-200">
@@ -347,42 +402,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                         </div>
                     </div>
 
-                    <div id="welcome-mode-selection" className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <button
-                            onClick={() => setIsPredictiveActive(false)}
-                            className={`p-6 rounded-2xl border-2 transition-all text-left ${!isPredictiveActive ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-100' : 'border-slate-100 hover:border-slate-300'}`}
-                            onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                        >
+                    <div id="welcome-mode-selection" className="mt-8">
+                        <div className="p-6 rounded-2xl border-2 border-blue-600 bg-blue-50/30 ring-4 ring-blue-100 text-left">
                             <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1">PRACTICE WITH ASCEND</h3>
                             <p className="text-xs text-slate-500">Step into a real interview experience tailored to your CV and the role you want</p>
-                        </button>
-                        <button
-                            onClick={() => setIsPredictiveActive(true)}
-                            className={`p-6 rounded-2xl border-2 transition-all text-left group ${isPredictiveActive ? 'border-indigo-600 bg-indigo-50/30 ring-4 ring-indigo-100' : 'border-slate-100 hover:border-slate-300'}`}
-                            onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                        >
-                            <div className="flex justify-between items-start">
-                                <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 mb-1"> Simple and Direct Job Search</h3>
-                                <div className="p-1 bg-indigo-600 rounded text-[8px] text-white font-black uppercase tracking-tighter flex items-center gap-1">
-                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-                                </div>
-                            </div>
-                            <p className="text-xs text-slate-500">Search smarter, track your applications, and stay on top of every opportunity</p>
-                        </button>
+                        </div>
                     </div>
                 </div>
 
-                {isPredictiveActive ? (
-                    <div className="px-8 pb-8 pt-4">
-                        <ResumeCoach
-                            criteria={DEFAULT_AUDIT_CRITERIA}
-                            onInitiatePractice={handleInitiatePractice}
-                            onMouseEnter={handleRegularHoverRead}
-                            onMouseLeave={cancelSpeech}
-                        />
-                    </div>
-                ) : (
-                    <form onSubmit={handleStart} className="p-8 border-t border-slate-200 animate-fade-in">
+                <form onSubmit={handleStart} className="p-8 border-t border-slate-200 animate-fade-in">
                         {priorSessionHint && (
                             <div className="mb-8 p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex items-start gap-3">
                                 <div className="w-2 h-2 mt-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
@@ -391,107 +419,82 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                 </p>
                             </div>
                         )}
-                        <div id="welcome-audio-cues" className="mb-10 p-6 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-6">
-                            <div>
-                                <h2 className="text-lg font-semibold text-slate-800 flex items-center" onMouseEnter={handleAudioActivationHover} onMouseLeave={cancelSpeech}>Welcome Screen Audio Guide <SpeakerIcon /></h2>
-                                <p className="text-slate-600 mt-1 text-sm">
-                                    Rest your cursor on any text to hear it read aloud- No clicking required.  </p>
-                            </div>
-                            <div id="welcome-audio-toggle" onClick={() => setAudioCues(!audioCues)} className={`flex-shrink-0 w-10 h-5 flex items-center rounded-full p-1 transition-colors cursor-pointer ${audioCues ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                                <div className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform ${audioCues ? 'translate-x-5' : ''}`} />
-                            </div>
-                        </div>
-
                         <div className="space-y-10">
-                            <div id="welcome-timer-display">
+                            <div id="welcome-participant-id">
                                 <fieldset>
                                     <div className="flex items-center mb-4" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                        <legend className="text-xl font-bold text-slate-800">Time Awareness</legend>
-                                        <HelpIcon onClick={(e) => showHelp('timer-display', e)} />
+                                        <legend className="text-xl font-bold text-slate-800">Your Participant ID</legend>
                                     </div>
-
-                                    <div className="space-y-6">
-                                        <div className="p-6 bg-blue-50/50 border border-blue-100 rounded-2xl" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                            <p className="text-sm font-semibold text-blue-900 mb-4">When you are doing something timed, which feels most true for you?</p>
-                                            <div className="grid grid-cols-1 gap-3">
-                                                {[
-                                                    "I forget about the clock and just speak",
-                                                    "I use the clock to pace myself",
-                                                    "The clock makes me rush"
-                                                ].map((ans) => (
-                                                    <button
-                                                        key={ans}
-                                                        type="button"
-                                                        onClick={() => setPreSessionAnswer(ans)}
-                                                        className={`w-full p-4 text-left text-sm font-medium rounded-xl border transition-all ${preSessionAnswer === ans ? 'bg-blue-600 border-blue-700 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300'}`}
-                                                        onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                                                    >
-                                                        {ans}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                                        <p className="text-xs text-slate-500 mb-2" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
+                                            This ID remembers your CV/JD and saved progress on this device, automatically, every time you return — no email needed. Save it somewhere safe if you want to pick up the same identity on a different device or browser.
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <code className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-800 truncate">{participantId}</code>
+                                            <button
+                                                type="button"
+                                                onClick={handleCopyId}
+                                                className="px-3 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-indigo-600 transition-all shrink-0"
+                                            >
+                                                {idCopied ? 'Copied' : 'Copy'}
+                                            </button>
                                         </div>
-
-                                        {preSessionAnswer && (
-                                            <div className="space-y-4 animate-fade-in">
-                                                <p className="text-xs font-bold text-blue-700 uppercase tracking-widest" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                                    Based on your preference, we suggest: <span className="text-blue-900">{
-                                                        timerFramingCondition === 'elapsed' ? 'Time Elapsed' :
-                                                            timerFramingCondition === 'duration' ? 'Response Duration' : 'Time Used'
-                                                    }</span>
-                                                </p>
-                                                <div className="grid grid-cols-1 gap-4">
-                                                    <RadioOption
-                                                        id="timer-progress"
-                                                        name="timerFraming"
-                                                        value="elapsed"
-                                                        label="🕐 Time Elapsed"
-                                                        description="No pressure, just see how long you spoke."
-                                                        checked={timerFramingCondition === 'elapsed'}
-                                                        onChange={(e) => setTimerFramingCondition(e.target.value as TimerFramingCondition)}
-                                                        onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                                                    />
-                                                    <RadioOption
-                                                        id="timer-countdown"
-                                                        name="timerFraming"
-                                                        value="duration"
-                                                        label="⏱ Response Duration"
-                                                        description="Hit the appropriate response time for 90 seconds."
-                                                        checked={timerFramingCondition === 'duration'}
-                                                        onChange={(e) => setTimerFramingCondition(e.target.value as TimerFramingCondition)}
-                                                        onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                                                    />
-                                                    <RadioOption
-                                                        id="timer-traffic"
-                                                        name="timerFraming"
-                                                        value="used"
-                                                        label="⏳ Time Used"
-                                                        description="Spend your time wisely. Put the best of your effort where it counts."
-                                                        checked={timerFramingCondition === 'used'}
-                                                        onChange={(e) => setTimerFramingCondition(e.target.value as TimerFramingCondition)}
-                                                        onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
-                                                    />
-                                                </div>
+                                        {!showSwitchId ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowSwitchId(true)}
+                                                className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-700"
+                                            >
+                                                Use a different ID instead
+                                            </button>
+                                        ) : (
+                                            <div className="mt-3 flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={switchIdDraft}
+                                                    onChange={e => setSwitchIdDraft(e.target.value)}
+                                                    placeholder="Paste an existing ID"
+                                                    className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-indigo-300"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSwitchId}
+                                                    disabled={!switchIdDraft.trim()}
+                                                    className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 disabled:opacity-40 transition-all shrink-0"
+                                                >
+                                                    Switch
+                                                </button>
                                             </div>
                                         )}
                                     </div>
                                 </fieldset>
                             </div>
 
-                            <div id="welcome-accessibility">
+                            <div id="welcome-support-and-clips">
                                 <fieldset>
                                     <div className="flex items-center mb-4" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                        <legend className="text-xl font-bold text-slate-800">Easy-to-Read Font</legend>
-                                        <HelpIcon onClick={(e) => showHelp('accessibility', e)} />
+                                        <legend className="text-xl font-bold text-slate-800">Support &amp; Answer Clips</legend>
+                                        <HelpIcon onClick={(e) => showHelp('support-and-clips', e)} />
                                     </div>
                                     <ToggleOption
-                                        id="accessibility-dyslexia"
-                                        label="Structural Font Adjustment"
-                                        description="Uses a clearer font to make text easier to read and reduce character confusion."
-                                        checked={dyslexiaFont}
-                                        onChange={() => setDyslexiaFont(!dyslexiaFont)}
+                                        id="support-save-clips"
+                                        label="Save my answer clips"
+                                        description="Keeps a recording of each answer (video if your camera is on, audio otherwise) in your Reflection Library, stored only in this browser. Off by default, never uploaded, never analysed beyond the transcript, never used to train any model."
+                                        checked={saveClips === 'device'}
+                                        onChange={() => setSaveClips(saveClips === 'device' ? 'off' : 'device')}
                                         onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
                                     />
+                                    <div className="mt-4">
+                                        <button
+                                            type="button"
+                                            onClick={onOpenSupportSettings}
+                                            onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
+                                            className="w-full p-4 text-left bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 transition-all"
+                                        >
+                                            <p className="text-sm font-bold text-slate-800">Support settings</p>
+                                            <p className="text-xs text-slate-500 mt-1">Clear Mode, voice, AI tutor and visual explanation preferences.</p>
+                                        </button>
+                                    </div>
                                 </fieldset>
                             </div>
 
@@ -539,7 +542,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                             onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}
                                         />
                                         <div className="pt-4" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>
-                                            <label className="block text-sm font-black uppercase tracking-widest text-slate-400 mb-2">Your CV / Resume (PDF Required)</label>
+                                            <label className="block text-sm font-black uppercase tracking-widest text-slate-400 mb-2">Your CV / Resume (PDF or Word)</label>
                                             <div
                                                 onClick={() => fileInputRef.current?.click()}
                                                 className={`w-full p-8 border-2 border-dashed rounded-2xl transition-all cursor-pointer flex flex-col items-center justify-center gap-3 ${pdfFileName
@@ -551,7 +554,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                     type="file"
                                                     ref={fileInputRef}
                                                     onChange={handleFileUpload}
-                                                    accept=".pdf"
+                                                    accept=".pdf,.docx,.doc"
                                                     className="hidden"
                                                 />
 
@@ -587,13 +590,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                                                             <FileUp className="w-6 h-6 text-slate-400 group-hover:text-blue-500" />
                                                         </div>
                                                         <div className="text-center">
-                                                            <p className="text-sm font-bold text-slate-600">Click to upload CV (PDF)</p>
+                                                            <p className="text-sm font-bold text-slate-600">Click to upload CV (PDF or Word)</p>
                                                             <p className="text-[10px] text-slate-400 font-medium">Practice with Ascend at your own pace</p>
                                                         </div>
                                                     </>
                                                 )}
                                             </div>
-                                            <p className="text-[10px] text-slate-400 mt-2 italic" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Please wait while the system aligns your input for question generation for the best interview experience. Our advanced interview practice platform correlates your PDF content with your verbal performance to detect Skill Gaps.</p>
+                                            <p className="text-[10px] text-slate-400 mt-2 italic" onMouseEnter={handleRegularHoverRead} onMouseLeave={cancelSpeech}>Please wait while the system aligns your input for question generation for the best interview experience. Our advanced interview practice platform correlates your CV content with your verbal performance to detect Skill Gaps.</p>
                                         </div>
                                         {generationError && (
                                             <p className="text-xs font-bold text-rose-600 flex items-center gap-1">
@@ -627,7 +630,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, logEvent }) => {
                             </button>
                         </div>
                     </form>
-                )}
             </div>
 
             {helpTopic && (

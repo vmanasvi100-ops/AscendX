@@ -15,12 +15,21 @@ router.post('/', async (req: Request, res: Response) => {
   const {
     participantId,
     consentId,
+    email,
     companyName,
     targetRole,
     jobDescription,
     cvText,
     settings,
     questions,
+    // Optional — present when the session has already completed by the time this
+    // call fires (the current frontend flow generates feedback before saving).
+    // All additive: omitting them behaves exactly as before.
+    sessionLog,
+    layerA,
+    maskedTranscript,
+    mesoRecord,
+    status,
   } = req.body;
 
   if (!participantId) {
@@ -34,18 +43,23 @@ router.post('/', async (req: Request, res: Response) => {
   const retentionExpiry = new Date(now);
   retentionExpiry.setFullYear(retentionExpiry.getFullYear() + 1); // Session expires after 12 months
 
+  const isComplete = status === 'complete';
+
   try {
     const result = await query<{ id: string }>(
       `INSERT INTO sessions
-         (participant_id, consent_id,
+         (participant_id, consent_id, email,
           company_name, target_role, job_description, cv_text,
           cv_purge_date, settings, questions,
+          session_log, layer_a, masked_transcript, meso_record,
+          status, completed_at,
           retention_expiry)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING id`,
       [
         participantId,
         consentId ?? null,
+        email ? email.trim().toLowerCase() : null,
         companyName ? encrypt(companyName) : null,
         targetRole ? encrypt(targetRole) : null,
         jobDescription ? encrypt(jobDescription) : null,
@@ -53,6 +67,12 @@ router.post('/', async (req: Request, res: Response) => {
         cvPurgeDate.toISOString(),
         JSON.stringify(settings ?? {}),
         JSON.stringify(questions ?? []),
+        JSON.stringify(sessionLog ?? []),
+        layerA !== undefined ? JSON.stringify(layerA) : null,
+        maskedTranscript ?? null,
+        mesoRecord !== undefined ? JSON.stringify(mesoRecord) : null,
+        isComplete ? 'complete' : 'in_progress',
+        isComplete ? now.toISOString() : null,
         retentionExpiry.toISOString(),
       ]
     );
@@ -64,13 +84,117 @@ router.post('/', async (req: Request, res: Response) => {
       actor: 'participant',
       participantId,
       sessionId,
-      metadata: { hasCV: !!cvText, hasJD: !!jobDescription },
+      metadata: { hasCV: !!cvText, hasJD: !!jobDescription, savedWithContent: !!layerA },
     });
 
     return res.status(201).json({ sessionId });
   } catch (err) {
     console.error('[SESSIONS] Create failed:', err);
     return res.status(500).json({ error: 'Failed to create session.' });
+  }
+});
+
+// ── GET /api/sessions/by-email/:email/history ─────────────────────────────────
+// Cross-device session history — looked up by email (stable across devices),
+// unlike participantId (fresh per browser tab).
+//
+// Exposure-reduction stopgap: this route has NO authentication — anyone who knows
+// or guesses a candidate's email can call it. It used to return layer_a (full
+// candidate-facing feedback: performance summary, strengths, weaknesses, coaching)
+// plus company_name/target_role, all keyed only by a guessable email. That's a real
+// exposure. Until proper email verification exists (OTP or similar — needs SMTP
+// credentials, deferred), this route returns ONLY meso_record: the minimum needed
+// to reconstruct MesoAccumulator client-side for cross-device coaching continuity
+// (growth trends, scaffold reduction, coaching-progression stage). No per-session
+// report content, no company/role names. Never returns cv_text/job_description
+// either, same as before.
+router.get('/by-email/:email/history', async (req: Request, res: Response) => {
+  const email = (req.params as { email: string }).email.trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'email is required.' });
+
+  try {
+    const result = await query(
+      `SELECT id, created_at, completed_at, status,
+              meso_record
+       FROM sessions
+       WHERE email = $1 AND status = 'complete'
+       ORDER BY created_at ASC`,
+      [email]
+    );
+
+    await logAuditEvent({
+      eventType: 'data_accessed',
+      actor: 'participant',
+      metadata: { resource: 'session_history_by_email', count: result.rowCount },
+    });
+
+    return res.status(200).json({ sessions: result.rows });
+  } catch (err) {
+    console.error('[SESSIONS] History lookup failed:', err);
+    return res.status(500).json({ error: 'Failed to fetch session history.' });
+  }
+});
+
+// ── GET /api/sessions/probe-effectiveness ─────────────────────────────────────
+// Aggregates probe_successful/depth_delta (already computed per-probe by
+// analyzeProbeResponse, never previously aggregated anywhere) by probe_type,
+// across every completed session. Answers: "are DEEPENING probes actually
+// producing better answers, or just STRATEGIC ones at session end?" — not a new
+// measurement, just surfacing data that was already being computed and discarded.
+// Researcher-tier only; mounted behind researcherMode on the frontend.
+router.get('/probe-effectiveness', async (_req: Request, res: Response) => {
+  try {
+    const result = await query<{ session_log: any }>(
+      `SELECT session_log FROM sessions WHERE status = 'complete' AND session_log IS NOT NULL`,
+      []
+    );
+
+    type Tally = { count: number; successCount: number; increased: number; same: number; decreased: number };
+    const PROBE_TYPES = ['CLARIFYING', 'CONCRETE', 'DEEPENING', 'REDIRECTING', 'STRATEGIC'] as const;
+    const byType: Record<string, Tally> = {};
+    PROBE_TYPES.forEach(t => { byType[t] = { count: 0, successCount: 0, increased: 0, same: 0, decreased: 0 }; });
+
+    let sessionsWithProbes = 0;
+    for (const row of result.rows) {
+      const log = Array.isArray(row.session_log) ? row.session_log : [];
+      let sessionHadProbe = false;
+      for (const entry of log) {
+        const probeType = entry?.probe?.probe_type;
+        const analysis = entry?.probeAnalysis;
+        if (!probeType || !analysis || !byType[probeType]) continue;
+        sessionHadProbe = true;
+        const t = byType[probeType];
+        t.count++;
+        if (analysis.probe_successful === true) t.successCount++;
+        if (analysis.depth_delta === 'increased') t.increased++;
+        else if (analysis.depth_delta === 'same') t.same++;
+        else if (analysis.depth_delta === 'decreased') t.decreased++;
+      }
+      if (sessionHadProbe) sessionsWithProbes++;
+    }
+
+    const byProbeType = PROBE_TYPES.map(type => {
+      const t = byType[type];
+      return {
+        probeType: type,
+        count: t.count,
+        successRate: t.count > 0 ? Math.round((t.successCount / t.count) * 1000) / 10 : null,
+        depthDelta: t.count > 0 ? {
+          increasedPct: Math.round((t.increased / t.count) * 1000) / 10,
+          samePct: Math.round((t.same / t.count) * 1000) / 10,
+          decreasedPct: Math.round((t.decreased / t.count) * 1000) / 10,
+        } : null,
+      };
+    });
+
+    return res.status(200).json({
+      sessionsAnalyzed: result.rowCount,
+      sessionsWithProbes,
+      byProbeType,
+    });
+  } catch (err) {
+    console.error('[SESSIONS] Probe effectiveness aggregation failed:', err);
+    return res.status(500).json({ error: 'Failed to aggregate probe effectiveness.' });
   }
 });
 

@@ -20,6 +20,7 @@ export interface GenerateFeedbackParams {
     totalQuestions: number;
   } | null;
   learningIntention?: string | null;
+  feedbackSeekingCount?: number; // candidate-initiated "Deep Probe" requests — exclude from scaffoldDependency, it's feedback-seeking not dependency
 }
 
 export const generateDetailedFeedback = async (
@@ -37,10 +38,12 @@ export const generateDetailedFeedback = async (
     ? `REGULATORY TRANSITION FRAMING: This candidate has shifted from prevention-focus to promotion-focus across sessions. Frame ALL development suggestions using BLENDED language — both as growth opportunities AND as protection against gaps. Example: "Building this skill opens new possibilities [promotion] while ensuring you avoid a gap interviewers look for [prevention]."`
     : '';
 
-  // 4D — Career adaptability stage: target only the NEXT stage (Savickas 4Cs sequence)
-  const careerAdaptabilityStage = mesoDelta?.currentCareerAdaptabilityStage ?? null;
-  const adaptabilityInstruction = careerAdaptabilityStage
-    ? `CAREER ADAPTABILITY STAGE TARGETING (Savickas 2012): This candidate is at the '${careerAdaptabilityStage}' stage. Component 5 (forwardOrientation) MUST target ONLY the next stage behaviour — do not reference all four Cs. concern→build planning orientation | control→reinforce personal agency | curiosity→encourage role exploration | confidence→strengthen career self-efficacy.`
+  // 4D — Coaching progression stage: target only the NEXT stage (design pattern inspired by Savickas
+  // 2012's 4Cs sequencing idea — this is a cross-session STAR-mastery-count heuristic, not a
+  // measurement of the candidate's actual career-adaptability resources)
+  const coachingProgressionStage = mesoDelta?.currentCoachingProgressionStage ?? null;
+  const adaptabilityInstruction = coachingProgressionStage
+    ? `COACHING PROGRESSION STAGE TARGETING: This candidate is at the '${coachingProgressionStage}' stage. Component 5 (forwardOrientation) MUST target ONLY the next stage behaviour — do not reference all four stages. planning→build planning orientation | ownership→reinforce personal agency | exploration→encourage role exploration | consolidation→strengthen career self-efficacy.`
     : '';
 
   // 4A — Mastery context for Layer B
@@ -223,8 +226,8 @@ THEORETICAL FRAMEWORK (apply deliberately — generic output is a failure condit
 • Boud & Molloy (2013): selfAssessmentPrompt MUST activate metacognition BEFORE coaching reveals.
 • PsyCap (Luthans 2007): Never attribute weakness to stable deficits. Frame every gap as learnable. Protect efficacy throughout.
 • Ericsson (1993): Every actionable suggestion = specific, bounded, immediately practicable drill. Not vague encouragement.
-• Cable & Kay (2012): professionalSelfVerificationSignals — self_verifying(genuine/personal) vs impression_managing(CV-close/performed).
-• Savickas (2012): forwardOrientation targets ONLY next adaptability stage: concern→control→curiosity→confidence.
+• presentationRegisterSignals: elaboration-vs-restatement word-choice signal — spontaneous(adds detail beyond CV) vs rehearsed(stays close to CV wording). Phrasing observation only, not an authenticity judgment.
+• Coaching progression (design pattern inspired by Savickas 2012's 4Cs sequencing idea): forwardOrientation targets ONLY the next coaching progression stage: planning→ownership→exploration→consolidation.
 • Higgins (1997) regulatory focus: prevention-focus→frame as gap-protection; promotion-focus→frame as strength-building.
 • NCS (2025) STAR weights: S=15%, T=15%, A=60%, R=10%. Action is the primary competency evidence source.
 
@@ -240,7 +243,7 @@ LAYER A — STUDENT-FACING FIELDS:
   starAnalysis, keywordCoverage, careerDevelopment, rubrics, cvJdAlignmentNote
 
 LAYER B — RESEARCHER-ONLY FIELDS:
-  meritVectors, triarchicMeritAlignment, professionalSelfVerificationSignals,
+  meritVectors, triarchicMeritAlignment, presentationRegisterSignals,
   socialIdentityAwareness,
   algorithmicAversionScore, psychologicalSafetyScore,
   biasAndFairnessNote, integrityViolation, maskedTranscript
@@ -346,14 +349,14 @@ IF algorithmicAversion.detected = true:
 3. Explain this average to the candidate (e.g., "Across all 5 questions, your Action sections were consistently the strongest, whereas Situation descriptions tended to be overly brief, averaging a lower detail score").
 4. Acknowledge consistency or variance across different question types.
 5. Use warm, coaching-centric language.
-[Cable & Kay (2012) Authentic self-verification — use professionalSelfVerificationSignals from Step 0, NOT impression management scoring]
-IF professionalSelfVerificationSignals.dominantMode = 'impression_managing':
-  Include one sentence inviting authentic disclosure:
+[Use presentationRegisterSignals from Step 0 — a word-choice/elaboration signal, NOT an authenticity judgment]
+IF presentationRegisterSignals.dominantMode = 'rehearsed':
+  Include one sentence inviting more elaboration:
   'Your answers were well-structured — there is also space to let the specific
    detail of your experience show through more directly.'
-IF professionalSelfVerificationSignals.dominantMode = 'self_verifying' AND any STAR component is partial or missing:
-  Include one sentence helping structure authentic content:
-  'You shared genuine experience — the next step is giving that experience
+IF presentationRegisterSignals.dominantMode = 'spontaneous' AND any STAR component is partial or missing:
+  Include one sentence helping structure the content:
+  'You shared specific, detailed experience — the next step is giving that experience
    a clearer structure so the interviewer can follow your contribution easily.'
 
 ── weaknesses ───────────────────────────────────────────────────────
@@ -396,7 +399,7 @@ Use the Step 0 lowest signals to prioritise these.
 
 PRIORITY ORDER for which suggestion leads:
   1. If lowestVector from Step 0 flags a behavioral evidence gap → Behavioral Evidence leads
-  2. If lowestSignal from chcCognitiveDimensions indicates a weak Kolb ELC stage → ELC stage coaching leads
+  2. If the lowest-scoring of elcStageSignals.{abstractConceptualisation,activeExperimentation,concreteExperience} is weak → ELC stage coaching leads (compute the lowest from the three scores directly — there is no separate "lowestSignal" field)
   3. Keyword coverage gap from JD
 
 Each suggestion MUST follow this four-part structure — no exceptions:
@@ -410,15 +413,20 @@ Part 3 — THE REWRITE: A complete, ready-to-use sentence in the candidate's voi
 Part 4 — REINFORCING RATIONALE: One sentence explaining the principle, ending with acknowledgement of capability.
   Must end with something genuine the candidate demonstrated that proves they can apply this immediately.
 
-BEHAVIORAL EVIDENCE TRANSLATIONS — ground these in specific transcript moments:
-  Autonomy weak: Root the suggestion in a specific "we" or passive phrase they used. Rewrite it as an "I decided/chose/initiated" sentence.
-  Competence weak: Root the suggestion in a specific description they gave that lacked numbers, timelines, or named tools. Provide the measurement.
-  Relatedness weak: Root the suggestion in a moment where they described an outcome without naming its effect on others. Add the people and the impact.
+BEHAVIORAL EVIDENCE TRANSLATIONS — ground these in specific transcript moments.
+NOTE: these are observed language patterns (word choice, sentence structure), not claims about
+the candidate's underlying psychology — do not reason about these as autonomy/competence/relatedness
+need-satisfaction (SDT constructs require a validated instrument, not transcript inference):
+  Personal agency weak (vague "we"/passive phrasing): Root the suggestion in a specific "we" or passive phrase they used. Rewrite it as an "I decided/chose/initiated" sentence.
+  Skill specificity weak (no named tools/numbers): Root the suggestion in a specific description they gave that lacked numbers, timelines, or named tools. Provide the measurement.
+  Impact articulation weak (no effect on others named): Root the suggestion in a moment where they described an outcome without naming its effect on others. Add the people and the impact.
 
-KOLB ELC STAGE COACHING TRANSLATIONS:
-  Gc weak: Root in a specific moment of vague domain language. Provide the sector-specific version.
-  Gf weak: Root in a specific moment where the candidate repeated their initial response rather than adapting. Provide the adaptive alternative.
-  Gq weak: Root in a specific Result statement that lacked measurement. Provide a measurable version.
+ELC STAGE COACHING TRANSLATIONS (Kolb 1984 stage-completion signals — language-pattern observations,
+not a claim about the candidate's cognitive ability; never reason about these as crystallized/fluid/
+quantitative intelligence):
+  Domain language weak (vague sector terminology): Root in a specific moment of vague domain language. Provide the sector-specific version.
+  Adaptive reasoning weak (repeated initial response under probing): Root in a specific moment where the candidate repeated their initial response rather than adapting. Provide the adaptive alternative.
+  Result specificity weak (unmeasured Result): Root in a specific Result statement that lacked measurement. Provide a measurable version.
 
 Formal, polite, warm, reinforcing tone in every part of every suggestion.
 
@@ -445,7 +453,8 @@ List: keywords present (with example usage), keywords missing (with one-line tip
 Language: 'You naturally used...' and 'It would strengthen your case to mention...'
 
 ── careerDevelopment ───────────────────────────────────────────────
-[Savickas Career Adaptability (2012) — 4Cs sequencing; SCCT (Lent et al., 1994) — build career self-efficacy]
+[Coaching progression sequencing — design pattern inspired by Savickas Career Adaptability (2012)'s 4Cs
+idea, not a measurement of adaptability resources; SCCT (Lent et al., 1994) — build career self-efficacy]
 [Deliberate Practice (Ericsson 2016) — nextSteps must be specific, bounded, immediately actionable]
 ${adaptabilityInstruction}
 Object containing:
@@ -466,7 +475,7 @@ IF scaffoldedLearningSignal.interpretation = 'independent':
   quality rather than structural confidence — the structure is already there.'
 
 ── cvJdAlignmentNote (Layer A — visible to candidate) ──────────
-IF credibilityFlag.triggered = false AND (cvAlignmentScore >= 60 OR jdAlignmentScore >= 60):
+IF alignmentGapFlag.triggered = false AND (cvGrounding = 'aligned' OR jdGrounding = 'aligned'):
   Write 1–2 sentences affirming that the candidate's answers drew on their
   documented experience and addressed the role's requirements directly.
   Example: "Your answers consistently drew on the stakeholder management experience
@@ -475,7 +484,7 @@ IF credibilityFlag.triggered = false AND (cvAlignmentScore >= 60 OR jdAlignmentS
   came through clearly."
   Include only when earned.
 
-IF credibilityFlag.triggered = true:
+IF alignmentGapFlag.triggered = true:
   Write a neutral, non-accusatory 1–2 sentence prompt encouraging the candidate
   to make more explicit connections between their specific past experiences and
   the core requirements of the role. Do NOT flag the misalignment to the candidate.
@@ -483,7 +492,7 @@ IF credibilityFlag.triggered = true:
   experiences from your background — the more precisely you connect what you have
   done to what this role requires, the more compelling your case becomes."
 
-IF both cvAlignmentScore and jdAlignmentScore are null:
+IF cvGrounding = 'no_cv' AND jdGrounding = 'no_jd':
   Return empty string.
 
 ── cvMissedOpportunities (Layer A — CV evidence the candidate possessed but did not deploy) ──
@@ -560,44 +569,44 @@ meritVectors: {
   primarySuggestionAnchor: string  // what Layer A's primary suggestion addresses
 }
 
-── professionalSelfVerificationSignals (Cable & Kay, 2012) ──────
+── presentationRegisterSignals (word-choice/elaboration register — renamed from
+'professionalSelfVerificationSignals'. Cable & Kay's self-verification is a felt alignment
+between self-concept and self-presentation, validated via dedicated instruments — comparing
+CV wording to transcript wording cannot measure that. This is a plain elaboration-vs-restatement
+observation, kept because it is a real, checkable textual signal and useful for coaching; it
+makes no claim about honesty, genuineness, or who the candidate "really is") ──
 
 You have two things in front of you:
-The CV — what the candidate carefully prepared before coming in.
+The CV — what the candidate prepared in advance.
 The transcript — what they actually said when put on the spot.
 
 Look at both together. Your job is simple:
 
-Did what they said in the room genuinely match and extend
-what they put on paper? Or did they just repeat their CV
+Did what they said in the room add new, specific detail beyond
+what's already in the CV? Or did they mostly repeat their CV
 back in different words?
 
-When someone is being real — adding personal stories,
-saying something new, going beyond what was asked —
-that is self-verifying. They are showing you the actual
-person behind the document.
-
-When someone is playing it safe — staying close to CV
-language, not adding anything personal, giving the
-"right" answer rather than the honest one — that is
-impression managing. The performance is covering
-the person.
+This is a phrasing observation, not a judgment of character. Elaborating
+beyond a CV is not evidence of honesty; staying close to CV language under
+time pressure is not evidence of dishonesty. Score it only as a coaching
+signal — "try adding specific detail beyond what's on paper" — never as
+an authenticity or genuineness judgment.
 
 Score these three things only:
 
 voice: {
   score: 0–100,
-  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  orientation: 'spontaneous' | 'rehearsed' | 'balanced',
   evidenceBasis: string
 
   Ask yourself:
-  Did they say something personal and genuine that
-  was not already sitting in their CV?
+  Did they add something specific and new that was
+  not already sitting in their CV?
 
-  Yes, something new and real came through = higher score,
-  self-verifying.
+  Yes, something new and specific came through = higher score,
+  spontaneous.
   No, they stayed inside what they already prepared =
-  lower score, impression managing.
+  lower score, rehearsed.
 
   Point to a specific moment in the transcript.
   Never write a general observation.
@@ -605,25 +614,24 @@ voice: {
 
 motivation: {
   score: 0–100,
-  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  orientation: 'spontaneous' | 'rehearsed' | 'balanced',
   evidenceBasis: string
 
   Ask yourself:
-  Did they give a real personal reason for wanting
-  this role — something that felt like it came from
-  them, not from the job description?
+  Did they give a specific personal reason for wanting
+  this role — something beyond a restatement of the
+  job description?
 
-  Real and personal = higher score, self-verifying.
+  Specific and personal = higher score, spontaneous.
   Sounded like they read the company website =
-  lower score, impression managing.
+  lower score, rehearsed.
 
-  Be specific about what they said and why it
-  felt real or performed.
+  Be specific about what they said.
 },
 
 explanation: {
   score: 0–100,
-  orientation: 'self_verifying' | 'impression_managing' | 'balanced',
+  orientation: 'spontaneous' | 'rehearsed' | 'balanced',
   evidenceBasis: string
 
   Ask yourself:
@@ -632,22 +640,21 @@ explanation: {
   as a result, what they learned?
 
   Went further without being asked = higher score,
-  self-verifying.
+  spontaneous.
   Answered just enough and stopped = lower score,
-  impression managing.
+  rehearsed.
 
-  Name the exact moment they either opened up
-  or held back.
+  Name the exact moment they either elaborated
+  or stopped.
 },
 
-dominantMode: 'self_verifying' | 'impression_managing' | 'mixed',
+dominantMode: 'spontaneous' | 'rehearsed' | 'mixed',
 // Which pattern showed up most across all three?
 // Mixed only if genuinely split, not as a default.
 
 fitSignal: string,
-// One sentence in plain English.
-// Does this candidate feel like a genuine fit for
-// this role or are they performing fit?
+// One sentence in plain English, describing the elaboration
+// pattern observed — never a claim about genuine vs performed fit.
 // Say what you saw. Never copy a template.
 
 feedbackImplication: string,
@@ -655,21 +662,21 @@ feedbackImplication: string,
 // wrote for the candidate?
 // Be specific — which suggestion came from this?
 
-researchNote: 'Cable & Kay (2012) Academy of Management
-Journal. Bridges: Kristof-Brown et al. (2005);
-Swann & Bosson (2010); Levashina et al. (2014).
-AI proxy — under investigation in AscendX RCT.'
+researchNote: 'Word-choice/elaboration register — AI operationalisation,
+empirical validation against external instruments pending. Renamed from
+Cable & Kay (2012) self-verification framing; see FRAMEWORK.md
+"Construct Correction" for rationale.'
 
-── credibilityFlag ──────────────────────────────────────────────
-This is a null-alignment detection signal. Flag when the gap between what the
-candidate said and what their documented background or the role requires is large
-enough to undermine confidence in the interview evidence.
+── alignmentGapFlag (renamed from 'credibilityFlag' — "credibility" frames this as a judgment of the
+candidate's honesty or trustworthiness, which this signal cannot establish from a text comparison
+alone. It is a CV/JD text-alignment-gap detector only.) ──────────────────────────────────────────────
+Flag when the gap between what the candidate said and what their documented background or the role
+requires is large enough that the interview evidence alone should not be read at face value.
 
-SET credibilityFlag.triggered = true IF:
-  cvAlignmentScore is not null AND cvAlignmentScore < 20
-  OR jdAlignmentScore is not null AND jdAlignmentScore < 20
+SET alignmentGapFlag.triggered = true IF:
+  cvGrounding = 'absent' OR jdGrounding = 'absent'
 
-credibilityFlag: {
+alignmentGapFlag: {
   triggered: true | false,
   cvGrounding: 'aligned' | 'partial' | 'absent' | 'no_cv',
   // aligned: clear traceable links between transcript and CV
@@ -686,7 +693,10 @@ credibilityFlag: {
   // Cite the specific mismatch: what did the candidate claim that cannot be
   // traced to their CV, or what core JD requirement went entirely unaddressed?
   // This is a researcher-only field — must be precise and evidence-grounded.
-  researchNote: 'Alignment gap between self-report and documented background. Exploratory signal — not a validity judgment. Possible explanations include: undocumented genuine experience, preparation failure, role mismatch, or fabrication. Researcher interpretation required.'
+  researchNote: 'Text-alignment gap between self-report and documented background. Exploratory signal —
+not a credibility, honesty, or validity judgment. Possible explanations include: undocumented genuine
+experience, preparation failure, role mismatch, or fabrication — this signal cannot distinguish between
+them. Researcher interpretation required.'
 }
 
 ── algorithmicAversionSignal (Trust Calibration — Dietvorst et al., 2015; updated framing 2024) ──
@@ -709,7 +719,10 @@ socialIdentityAwareness: {
   scopeNote: 'Applied only where candidate discussed organisation motivation'
 }
 
-── chcCognitiveDimensions (Kolb ELC Stage Completion Signals — Kolb 1984; POT proxy per Kovacs & Conway 2016) ──
+── elcStageSignals (Kolb ELC Stage Completion Signals — Kolb 1984; POT proxy per Kovacs & Conway 2016) ──
+Renamed from 'chcCognitiveDimensions' — CHC (Cattell-Horn-Carroll) is a cognitive-ability taxonomy,
+and even though these fields were already Kolb-named rather than ability-coded, the container name
+itself still implied ability measurement. An interview transcript cannot measure cognitive ability.
 THEORETICAL GROUNDING: These are Kolb ELC stage completion signals inferred from transcript quality.
 They do NOT claim to measure cognitive ability. Field names match Kolb stage terminology directly.
   abstractConceptualisation: AC quality — did the candidate draw on accumulated domain knowledge to
@@ -719,7 +732,7 @@ They do NOT claim to measure cognitive ability. Field names match Kolb stage ter
   concreteExperience: CE specificity — did the candidate articulate measurable outcomes, grounding
     abstract reflection in specific evidence?
 Process Overlap Theory (Kovacs & Conway, 2016) provides the inferential mechanism.
-chcCognitiveDimensions: {
+elcStageSignals: {
   abstractConceptualisation: {
     score: 0–100 | null,
     // AC signal: depth of domain knowledge applied; vocabulary precision; role-specific evidence drawn on
@@ -745,12 +758,18 @@ chcCognitiveDimensions: {
 ── scaffoldedLearningSignal (Vygotsky 1978; Wood et al. 1976; adaptive LLM scaffolding theory 2025) ─
 NOTE: Probe difficulty escalation follows LLM-based adaptive scaffolding principles (arxiv 2025)
 where support withdrawal is based on observed performance, not fixed question index.
+IMPORTANT: scaffoldDependency must measure dependency on SYSTEM-initiated probes only (the one
+automatic follow-up per question). A candidate who used the manual "Deep Probe" button to request
+additional follow-ups chose that support — that's feedback-seeking behaviour, not evidence of
+dependency, and scoring it as dependency penalises engaged candidates for asking for more coaching.
+${params.feedbackSeekingCount ? `This candidate made ${params.feedbackSeekingCount} candidate-initiated Deep Probe request(s) this session — do not let that count push scaffoldDependency.score higher.` : ''}
 scaffoldedLearningSignal: {
   zpdProgressionObservation: string,  // did performance improve across phases?
   scaffoldDependency: {
     score: 0–100,
     // >70 = high dependency, performed much better with scaffold than without
     // <40 = low dependency, consistent across phases
+    // Based on SYSTEM-initiated probes only — see IMPORTANT note above.
     interpretation: 'scaffolded' | 'independent' | 'declining',
     researchNote: string
   },
@@ -1020,7 +1039,11 @@ text: string
               },
               required: ["personalAgency", "skillSpecificity", "impactArticulation", "lowestVector", "primarySuggestionAnchor"]
             },
-            professionalSelfVerificationSignals: {
+            // Renamed from 'professionalSelfVerificationSignals' — Cable & Kay's self-verification is a
+            // felt alignment between self-concept and self-presentation, validated via dedicated
+            // instruments; comparing CV wording to transcript wording cannot measure that. This is a
+            // word-choice/elaboration register signal, not an authenticity or genuineness judgment.
+            presentationRegisterSignals: {
               type: Type.OBJECT,
               properties: {
                 voice: {
@@ -1030,8 +1053,8 @@ text: string
                     orientation: {
                       type: Type.STRING,
                       enum: [
-                        'self_verifying',
-                        'impression_managing',
+                        'spontaneous',
+                        'rehearsed',
                         'balanced'
                       ]
                     },
@@ -1046,8 +1069,8 @@ text: string
                     orientation: {
                       type: Type.STRING,
                       enum: [
-                        'self_verifying',
-                        'impression_managing',
+                        'spontaneous',
+                        'rehearsed',
                         'balanced'
                       ]
                     },
@@ -1062,8 +1085,8 @@ text: string
                     orientation: {
                       type: Type.STRING,
                       enum: [
-                        'self_verifying',
-                        'impression_managing',
+                        'spontaneous',
+                        'rehearsed',
                         'balanced'
                       ]
                     },
@@ -1074,8 +1097,8 @@ text: string
                 dominantMode: {
                   type: Type.STRING,
                   enum: [
-                    'self_verifying',
-                    'impression_managing',
+                    'spontaneous',
+                    'rehearsed',
                     'mixed'
                   ]
                 },
@@ -1093,7 +1116,10 @@ text: string
                 "researchNote"
               ]
             },
-            credibilityFlag: {
+            // Renamed from 'credibilityFlag' — "credibility" frames this as a judgment of the
+            // candidate's honesty or trustworthiness, which a CV/JD text-alignment comparison alone
+            // cannot establish. This is a text-alignment-gap detector only.
+            alignmentGapFlag: {
               type: Type.OBJECT,
               properties: {
                 triggered: { type: Type.BOOLEAN },
@@ -1124,7 +1150,7 @@ text: string
               },
               required: ["activated", "scopeNote"]
             },
-            chcCognitiveDimensions: {
+            elcStageSignals: {
               type: Type.OBJECT,
               properties: {
                 abstractConceptualisation: { type: Type.OBJECT, properties: { score: { type: Type.NUMBER, nullable: true }, evidenceBasis: { type: Type.STRING }, validityDisclaimer: { type: Type.STRING } }, required: ["evidenceBasis", "validityDisclaimer"] },
@@ -1276,10 +1302,10 @@ text: string
             "careerDevelopment",
             "rubrics",
             "meritVectors",
-            "professionalSelfVerificationSignals",
+            "presentationRegisterSignals",
             "algorithmicAversionSignal",
             "socialIdentityAwareness",
-            "chcCognitiveDimensions",
+            "elcStageSignals",
             "scaffoldedLearningSignal",
             "psychologicalSafetyScore",
             "biasAndFairnessNote",
@@ -1305,6 +1331,30 @@ text: string
     // 4B — Inject prior session gaps into calibrationAccuracy
     if (params.mesoAccumulator && parsed.calibrationAccuracy) {
       parsed.calibrationAccuracy.priorSessionGaps = priorSessionGaps;
+    }
+
+    // Backward-compat alias for AscendPlatform.tsx (sealed) — still reads chcCognitiveDimensions
+    // directly. Inner field names were already honest (Kolb stage terms); only the container name
+    // carried CHC's cognitive-ability branding, so this is a straight reference, no remapping needed.
+    if (parsed.elcStageSignals) {
+      parsed.chcCognitiveDimensions = parsed.elcStageSignals;
+    }
+
+    // Backward-compat alias for AscendPlatform.tsx (sealed) — still reads
+    // professionalSelfVerificationSignals.{voice,motivation,explanation}.orientation directly, checking
+    // for the literal strings 'self_verifying'/'impression_managing'. Same data, honestly-named source.
+    if (parsed.presentationRegisterSignals) {
+      const orientationMap: Record<string, string> = { spontaneous: 'self_verifying', rehearsed: 'impression_managing', balanced: 'balanced' };
+      const dominantModeMap: Record<string, string> = { spontaneous: 'self_verifying', rehearsed: 'impression_managing', mixed: 'mixed' };
+      const aliasDimension = (d: { score: number; orientation: string; evidenceBasis: string }) => ({
+        score: d.score, orientation: orientationMap[d.orientation] ?? d.orientation, evidenceBasis: d.evidenceBasis,
+      });
+      const p = parsed.presentationRegisterSignals;
+      parsed.professionalSelfVerificationSignals = {
+        voice: aliasDimension(p.voice), motivation: aliasDimension(p.motivation), explanation: aliasDimension(p.explanation),
+        dominantMode: dominantModeMap[p.dominantMode] ?? p.dominantMode,
+        fitSignal: p.fitSignal, feedbackImplication: p.feedbackImplication, researchNote: p.researchNote,
+      };
     }
 
     return parsed;

@@ -106,11 +106,16 @@ export interface AuditResult {
 // ─── Framework Evaluation Types — DMGT-AMO-ZPD-DCT ──────────────────
 export type CompetencyDemonstrationLevel = 'Emerging' | 'Developing' | 'Established' | 'Advanced';
 
-export interface AmoReadiness {
-  ability: 'high' | 'moderate' | 'low';
-  motivation: 'high' | 'moderate' | 'low';
-  opportunity: 'high' | 'moderate' | 'low';
-  amo_note: string;
+// Renamed from 'AmoReadiness'/ability·motivation·opportunity — Appelbaum et al. (2000)'s AMO model
+// describes organizational-level performance drivers; it is not something inferable as a trait from
+// a single interview response. These are plain-language observations used only to decide whether a
+// weak response should be attributed to missing skill evidence, low engagement, or format pressure —
+// not a measurement of the candidate's actual ability, motivation, or opportunity.
+export interface PerformanceContextSignal {
+  skill_evidence_level: 'high' | 'moderate' | 'low';
+  engagement_level: 'high' | 'moderate' | 'low';
+  format_conditions_level: 'high' | 'moderate' | 'low';
+  context_note: string;
 }
 
 export type TimerDisplay = 'progressBar' | 'countdown' | 'elapsed' | 'pacingAnchor';
@@ -147,7 +152,8 @@ export type AnalyticsEventType =
   | 'feedback_report_opened' | 'practice_task_noted'
   | 'cv_uploaded' | 'cv_upload_declined' | 'questions_generated' | 'profile_submitted'
   | 'probe_used'
-  | 'question_answered' | 'reflection_submitted' | 'self_rating_submitted';
+  | 'question_answered' | 'reflection_submitted' | 'self_rating_submitted'
+  | 'support_used';
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
@@ -185,7 +191,43 @@ export interface Settings {
   condition: ExperimentCondition;
   cvText?: string;
   coachMarkTheme: CoachMarkTheme;
+  // Clear Mode (accessibility — adapted/explicit question presentation). Off by default; the
+  // candidate switches it on themselves in Support settings. Informed by Maras et al.'s University
+  // of Bath study on adapted interview questions for autistic candidates — never shown or framed
+  // as diagnosis-linked, just a presentation preference anyone can choose.
+  clearModeEnabled: boolean;
+  clearModeAppearance: ClearModeAppearance;
+  // Reflection Library clip saving. Off by default — opt-in only, per the same Support settings
+  // page as Clear Mode. 'device' stores clips locally (IndexedDB) only; they are never uploaded,
+  // never analysed beyond the transcript already produced for coaching, and never used to train
+  // any model. No 'device_and_account' (cloud) tier yet — that needs real encrypted backend
+  // storage and is out of scope for this slice.
+  saveClips: ClipSaveMode;
+  // Spoken-voice preferences for Talk It Through and Explain It Visually's narration — a candidate
+  // choice, not a default imposed on everyone. 'any' lets the browser pick its default voice.
+  // Gender matching is heuristic (the Web Speech API doesn't expose real voice-gender metadata,
+  // only names) — see services/voicePersona.ts for the honest caveat on that.
+  voiceGenderPreference: VoiceGenderPreference;
+  voiceTone: VoiceTone;
+  aiTutorVoiceMode: AITutorVoiceMode;
+  visualExplanationsTrigger: VisualExplanationsTrigger;
 }
+
+export type ClearModeAppearance = 'one_at_a_time' | 'checklist' | 'standard';
+export type ClipSaveMode = 'off' | 'device';
+export type VoiceGenderPreference = 'any' | 'male' | 'female';
+export type VoiceTone = 'warm' | 'direct';
+// 'text_only' silences Talk It Through's speechSynthesis narration entirely — the candidate still
+// sees the Clear Picture and the audio-primary thread UI, just with the one "Speaking…" indicator
+// never firing. Default 'spoken_and_text' preserves exactly the prior always-speaks behavior.
+export type AITutorVoiceMode = 'spoken_and_text' | 'text_only';
+// Controls whether the "Explain this visually" button appears at all. 'always_show_button' and
+// 'only_when_asked' currently render identically (the button is always visible either way,
+// nothing auto-opens the panel) — true "always" behavior (auto-playing a visual explanation
+// without a click) isn't built, since that would mean auto-triggering an AI generation call
+// rather than only on explicit request, a real behavior and cost change left for later. 'never'
+// hides the button entirely.
+export type VisualExplanationsTrigger = 'always_show_button' | 'only_when_asked' | 'never';
 
 // Fix: Added TourResettableSettings interface
 export interface TourResettableSettings {
@@ -255,21 +297,6 @@ export interface SocialIdentityAwareness {
   scopeNote: string;
 }
 
-// ─── NEW v5.0: CHC Cognitive Dimensions (replaces Sternberg) ────────
-export interface CHCDimension {
-  score: number | null;
-  evidenceBasis: string;
-  validityDisclaimer: string;
-}
-
-export interface CHCCognitiveDimensions {
-  abstractConceptualisation: CHCDimension;  // Kolb AC
-  activeExperimentation: CHCDimension;       // Kolb AE
-  concreteExperience: CHCDimension;          // Kolb CE
-  overallELCNote: string;
-  researchNote: string;
-}
-
 // ─── NEW v5.0: Scaffolded Learning Signal (Vygotsky / Wood et al.) ──
 export interface ScaffoldedLearningSignal {
   zpdProgressionObservation: string;
@@ -298,7 +325,6 @@ export interface LayerBSignals {
   professionalSelfVerificationSignals: ProfessionalSelfVerificationSignals;
   algorithmicAversionSignal: AlgorithmicAversionSignal;
   socialIdentityAwareness: SocialIdentityAwareness;
-  chcCognitiveDimensions: CHCCognitiveDimensions;
   scaffoldedLearningSignal: ScaffoldedLearningSignal;
   psychologicalSafetyScore: {
     score: number;
@@ -360,11 +386,26 @@ export interface DetailedFeedback {
     lowestVector: 'personalAgency' | 'skillSpecificity' | 'impactArticulation';
     primarySuggestionAnchor: string;
   };
+  // Deprecated alias of presentationRegisterSignals, computed server-side for backward compat — kept
+  // only because AscendPlatform.tsx (sealed) reads this shape directly. Cable & Kay's self-verification
+  // is a felt alignment between self-concept and self-presentation, validated via dedicated instruments;
+  // comparing CV wording to transcript wording cannot measure that. New code should use
+  // presentationRegisterSignals instead.
   professionalSelfVerificationSignals?: {
     voice: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
     motivation: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
     explanation: { score: number; orientation: 'self_verifying' | 'impression_managing' | 'balanced'; evidenceBasis: string };
     dominantMode: 'self_verifying' | 'impression_managing' | 'mixed';
+    fitSignal: string;
+    feedbackImplication: string;
+    researchNote: string;
+  };
+  // Word-choice/elaboration register signal (honestly named — the actual source of truth).
+  presentationRegisterSignals?: {
+    voice: { score: number; orientation: 'spontaneous' | 'rehearsed' | 'balanced'; evidenceBasis: string };
+    motivation: { score: number; orientation: 'spontaneous' | 'rehearsed' | 'balanced'; evidenceBasis: string };
+    explanation: { score: number; orientation: 'spontaneous' | 'rehearsed' | 'balanced'; evidenceBasis: string };
+    dominantMode: 'spontaneous' | 'rehearsed' | 'mixed';
     fitSignal: string;
     feedbackImplication: string;
     researchNote: string;
@@ -381,7 +422,19 @@ export interface DetailedFeedback {
     dominantMotivation: 'value_expression' | 'social_recognition' | null;
     scopeNote: string;
   };
+  // Deprecated alias of elcStageSignals, computed server-side for backward compat — kept only because
+  // AscendPlatform.tsx (sealed) reads this shape directly. "CHC" (Cattell-Horn-Carroll) is a cognitive-
+  // ability taxonomy; an interview transcript cannot measure cognitive ability, so new code should use
+  // elcStageSignals instead. Inner fields were already Kolb-ELC-named — only this container name carried
+  // the ability-measurement framing.
   chcCognitiveDimensions?: {
+    abstractConceptualisation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    activeExperimentation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    concreteExperience: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
+    overallELCNote: string;
+    researchNote: string;
+  };
+  elcStageSignals?: {
     abstractConceptualisation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
     activeExperimentation: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
     concreteExperience: { score: number | null; evidenceBasis: string; validityDisclaimer: string };
@@ -483,6 +536,12 @@ export interface Probe {
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   question_type: 'INTRODUCTORY_ALIGNMENT' | 'CORE_COMPETENCY' | 'STRATEGIC_HIGH_STAKES';
   zpd_note: string;
+  // Who triggered this probe — 'system' (automatic, fires once per question after STAR completion)
+  // vs 'candidate' (manual "Deep Probe" button). Scaffold-dependency metrics should only be driven
+  // by system-initiated probes — a candidate choosing to ask for more probes is feedback-seeking
+  // behaviour, not evidence of dependency, and conflating the two overstates how much support
+  // someone needed.
+  initiated_by?: 'system' | 'candidate';
 }
 
 
@@ -524,25 +583,53 @@ export interface ProbeAnalysis {
   coaching_guidance?: CoachingGuidance;
 
   // Continuous Analysis Signals (Returned every time)
+  // Deprecated alias of behavioral_evidence_vectors, computed server-side for backward compat —
+  // kept only because QuestionReport.tsx and AscendPlatform.tsx (sealed) read this shape directly.
+  // 'autonomy'/'competence'/'relatedness' are SDT need-satisfaction constructs (felt psychological
+  // states, validated only via instruments like the BPNS scale) — a transcript language count is
+  // not that measurement. New code should use behavioral_evidence_vectors instead.
   merit_vectors: {
-    autonomy: number;
-    competence: number;
-    relatedness: number;
+    autonomy: number;      // = behavioral_evidence_vectors.personal_agency
+    competence: number;    // = behavioral_evidence_vectors.skill_specificity
+    relatedness: number;   // = behavioral_evidence_vectors.impact_articulation
     lowest_vector: 'autonomy' | 'competence' | 'relatedness';
   };
-  presentation_authenticity: {
-    front_stage: number;  // polished/curated language — staying close to CV (Cable & Kay 2012)
-    back_stage: number;   // personal/genuine — going beyond what was prepared; high = self-verifying
+  // Behavioral evidence density counts (honestly named — the actual source of truth).
+  behavioral_evidence_vectors?: {
+    personal_agency: number;
+    skill_specificity: number;
+    impact_articulation: number;
+    lowest_vector: 'personal_agency' | 'skill_specificity' | 'impact_articulation';
   };
+  // Deprecated alias of presentation_register, computed server-side for backward compat — kept only
+  // because QuestionReport.tsx and AscendPlatform.tsx (sealed) read this shape directly. Goffman's
+  // front-stage/back-stage and Cable & Kay's self-verification are both constructs a single response's
+  // phrasing register cannot validly measure — this is a word-choice observation, not authenticity.
+  presentation_authenticity: {
+    front_stage: number;  // = presentation_register.rehearsed_language
+    back_stage: number;   // = presentation_register.spontaneous_language
+  };
+  // Language-register word-choice signal (honestly named — the actual source of truth).
+  presentation_register?: {
+    rehearsed_language: number;
+    spontaneous_language: number;
+  };
+  // Deprecated alias of response_quality_signals, computed server-side for backward compat —
+  // kept only because QuestionReport.tsx and AscendPlatform.tsx (sealed) read this shape directly.
+  // 'gc'/'gf'/'gq' were Cattell-Horn-Carroll cognitive-ability codes; an interview transcript
+  // cannot measure cognitive ability, so new code should use response_quality_signals instead.
   chc_signals: {
-    // gc → Kolb AC (Abstract Conceptualisation): domain knowledge depth
-    // gf → Kolb AE (Active Experimentation): adaptive reasoning under probing
-    // gq → Kolb CE (Concrete Experience): result specificity and measurable outcomes
-    // Field names kept stable for QuestionReport.tsx compatibility
-    gc: 'strong' | 'moderate' | 'weak';
-    gf: 'strong' | 'moderate' | 'weak';
-    gq: 'strong' | 'moderate' | 'weak';
+    gc: 'strong' | 'moderate' | 'weak';   // = response_quality_signals.domain_language
+    gf: 'strong' | 'moderate' | 'weak';   // = response_quality_signals.adaptive_reasoning
+    gq: 'strong' | 'moderate' | 'weak';   // = response_quality_signals.evidence_specificity
     lowest_signal: 'gc' | 'gf' | 'gq';
+  };
+  // Kolb ELC stage-completion language-pattern signals (honestly named — the actual source of truth).
+  response_quality_signals?: {
+    domain_language: 'strong' | 'moderate' | 'weak';      // Kolb AC — domain knowledge applied
+    adaptive_reasoning: 'strong' | 'moderate' | 'weak';   // Kolb AE — adaptive reasoning under probing
+    evidence_specificity: 'strong' | 'moderate' | 'weak'; // Kolb CE — measurable, specific outcomes
+    lowest_signal: 'domain_language' | 'adaptive_reasoning' | 'evidence_specificity';
   };
 
   algorithmic_aversion: {
@@ -553,8 +640,45 @@ export interface ProbeAnalysis {
   // DMGT-AMO-ZPD-DCT Framework signals (additive — all optional for backward compat)
   competency_demonstration_level?: CompetencyDemonstrationLevel;
   competency_demonstration_descriptor?: string;
-  amo_readiness?: AmoReadiness;
+  performance_context_signal?: PerformanceContextSignal;
   zpd_boundary_type?: 'act_one' | 'probed';
+
+  // Competency verification + Tomlinson (2017) Graduate Capital correlation
+  // (additive — optional for backward compat; does not alter existing probing logic)
+  competency_verification?: {
+    competency_tested: string;
+    verified: boolean;
+    evidence_quote: string;
+    confidence: 'low' | 'moderate' | 'high';
+  };
+  // Deprecated alias of strength_domain_signal, computed server-side for backward compat — kept only
+  // because AscendPlatform.tsx (sealed) reads this shape directly. Tomlinson (2017)'s graduate capital
+  // model is a validated employability framework; a single response's evidence domain is not a
+  // measurement of a candidate's actual capital reserves. New code should use strength_domain_signal.
+  graduate_capital_signal?: GraduateCapitalSignal;
+  // Evidence-domain classification (honestly named — the actual source of truth).
+  strength_domain_signal?: StrengthDomainSignal;
+}
+
+// Design reference only: Tomlinson, M. (2017). Forms of graduate capital and their relationship to
+// graduate employability. Education + Training, 59(4), 338–352. https://doi.org/10.1108/ET-05-2016-0090
+// — used to choose which evidence domains are worth distinguishing, not as a claim that a single
+// response validly measures "capital" in Tomlinson's psychometric sense.
+export type StrengthDomain = 'technical_skill' | 'relationship_network' | 'professional_fit' | 'resilience' | 'professional_narrative';
+
+export interface StrengthDomainSignal {
+  primary_domain: StrengthDomain;
+  secondary_domain: StrengthDomain | null;
+  evidence_basis: string;
+}
+
+// Deprecated — kept only for the graduate_capital_signal backward-compat alias shape above.
+export type GraduateCapital = 'human' | 'social' | 'cultural' | 'psychological' | 'identity';
+
+export interface GraduateCapitalSignal {
+  primary_capital: GraduateCapital;
+  secondary_capital: GraduateCapital | null;
+  evidence_basis: string;
 }
 
 export interface QuestionSummaryReport {
@@ -660,7 +784,12 @@ export type RegFocusDelta =
   | 'promotion_to_prevention';
 
 export type FeedbackOrientationDelta = 'improving' | 'stable' | 'declining' | 'insufficient_data';
-export type CareerAdaptabilityStage  = 'concern' | 'control' | 'curiosity' | 'confidence';
+// Renamed from 'CareerAdaptabilityStage'/concern·control·curiosity·confidence (Savickas 2012's 4Cs) —
+// this is computed directly from masteryConsolidated.length (a cross-session STAR-component count),
+// not a measurement of the candidate's actual felt career-adaptability resources, which Savickas's
+// model validates via the CAAS instrument. Kept (renamed, not removed) because the underlying
+// next-stage-only sequencing has real coaching value for the Growth Summary.
+export type CoachingProgressionStage  = 'planning' | 'ownership' | 'exploration' | 'consolidation';
 export type ScaffoldTrend            = 'reducing' | 'stable' | 'increasing' | 'insufficient_data';
 export type MasteryComponent         = 'situation' | 'task' | 'action' | 'result';
 
@@ -678,21 +807,27 @@ export interface SessionRecord {
   selfReportedAnxietyLevel: string;         // free-text from pre-session question
   forwardOrientationNotes: string[];        // Component 5 text from each question
   starComponentsReached: MasteryComponent[];
+  feedbackSeekingCount?: number;            // candidate-initiated Deep Probe requests — kept separate from scaffoldDependencyScore
 }
 
 export interface MesoDelta {
   sessionCount: number;
   competencySlope: number;                  // least-squares slope across sessions (positive = improving)
+  // A slope through <3 points has no residual degrees of freedom — these two fields let callers
+  // check whether competencySlope is statistically estimable at all before acting on it.
+  competencyTrendReliable: boolean;         // true only when sessionCount (with valid data) >= 3
+  competencySlopeStandardError: number | null;
   scaffoldTrend: ScaffoldTrend;
-  mesoScaffoldReduced: boolean;             // true when scaffoldDependencyScore slope < -0.1
+  mesoScaffoldReduced: boolean;             // true when scaffoldDependencyScore slope < -0.1 AND reliable (n>=3)
   regulatoryShift: RegFocusDelta;
   feedbackOrientationDelta: FeedbackOrientationDelta;
   dominantAnxietyLevel: 'low' | 'mild' | 'moderate' | 'high';
   masteryConsolidated: MasteryComponent[];  // STAR components evidenced in ≥ 2 sessions
   forwardOrientationActioned: boolean;      // did Session N evidence Session N-1's recommendation?
-  currentCareerAdaptabilityStage: CareerAdaptabilityStage;
+  currentCoachingProgressionStage: CoachingProgressionStage;
   priorFeedForwardAction: string | null;    // last forwardOrientation note from Session N-1
-  zpd_lowerBoundaryAdvanced: boolean;       // true if ZPD lower boundary is above Phase 1 baseline
+  zpd_lowerBoundaryAdvanced: boolean;       // true if ZPD lower boundary trend is reliable (n>=3) AND rising
+  zpdTrendReliable: boolean;                // true only when lower-boundary data points >= 3
 }
 
 export interface MesoAccumulator {

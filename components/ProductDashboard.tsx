@@ -10,7 +10,7 @@ interface ProductDashboardProps {
     onClearParticipant?: (participantId: string) => void;
 }
 
-type DashboardTab = 'links' | 'participants' | 'registration' | 'funnel' | 'raw_data';
+type DashboardTab = 'links' | 'participants' | 'registration' | 'funnel' | 'probe_quality' | 'cv_files' | 'raw_data';
 
 // ── CSV Export ───────────────────────────────────────────────────────────────
 // Builds a per-question-per-session CSV from the analytics event log.
@@ -157,6 +157,55 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
     React.useEffect(() => {
         fetchRegistered();
     }, [fetchRegistered]);
+
+    // ── Probe effectiveness (Probe Quality tab) ───────────────────────────────
+    type ProbeEffectiveness = {
+        sessionsAnalyzed: number;
+        sessionsWithProbes: number;
+        byProbeType: { probeType: string; count: number; successRate: number | null; depthDelta: { increasedPct: number; samePct: number; decreasedPct: number } | null }[];
+    };
+    const [probeEffectiveness, setProbeEffectiveness] = React.useState<ProbeEffectiveness | null>(null);
+    const [probeEffLoading, setProbeEffLoading] = React.useState(false);
+    const [probeEffError, setProbeEffError] = React.useState<string | null>(null);
+
+    const fetchProbeEffectiveness = React.useCallback(async () => {
+        setProbeEffLoading(true);
+        setProbeEffError(null);
+        try {
+            const res = await fetch('/api/sessions/probe-effectiveness');
+            if (res.ok) setProbeEffectiveness(await res.json());
+            else setProbeEffError('Failed to load probe effectiveness data.');
+        } catch { setProbeEffError('Backend unavailable.'); }
+        finally { setProbeEffLoading(false); }
+    }, []);
+
+    React.useEffect(() => {
+        if (activeTab === 'probe_quality' && !probeEffectiveness && !probeEffLoading) fetchProbeEffectiveness();
+    }, [activeTab, probeEffectiveness, probeEffLoading, fetchProbeEffectiveness]);
+
+    // ── CV Files tab state ────────────────────────────────────────────────────
+    type CvFileRow = {
+        id: string; participantId: string | null; email: string | null;
+        fileName: string; fileMime: string; fileSizeBytes: number; createdAt: string;
+    };
+    const [cvFiles, setCvFiles] = React.useState<CvFileRow[]>([]);
+    const [cvFilesLoading, setCvFilesLoading] = React.useState(false);
+    const [cvFilesError, setCvFilesError] = React.useState<string | null>(null);
+
+    const fetchCvFiles = React.useCallback(async () => {
+        setCvFilesLoading(true);
+        setCvFilesError(null);
+        try {
+            const res = await fetch('/api/cv-files');
+            if (res.ok) setCvFiles((await res.json()).files ?? []);
+            else setCvFilesError('Failed to load uploaded CVs.');
+        } catch { setCvFilesError('Backend unavailable.'); }
+        finally { setCvFilesLoading(false); }
+    }, []);
+
+    React.useEffect(() => {
+        if (activeTab === 'cv_files' && cvFiles.length === 0 && !cvFilesLoading) fetchCvFiles();
+    }, [activeTab, cvFiles.length, cvFilesLoading, fetchCvFiles]);
 
     // participant_id (anonymous analytics ID) -> email, so exports can join the two.
     const emailByParticipantId = React.useMemo(() => {
@@ -499,6 +548,8 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
         participants: 'Participants',
         registration: 'Study Registration',
         funnel: 'Funnel & Stats',
+        probe_quality: 'Probe Quality',
+        cv_files: 'CV Files',
         raw_data: 'Raw Data Log',
     };
 
@@ -530,7 +581,7 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                 </header>
 
                 <nav className="flex px-8 border-b border-slate-800 bg-slate-900/30 overflow-x-auto">
-                    {(['links', 'participants', 'registration', 'funnel', 'raw_data'] as DashboardTab[]).map(tab => (
+                    {(['links', 'participants', 'registration', 'funnel', 'probe_quality', 'cv_files', 'raw_data'] as DashboardTab[]).map(tab => (
                         <button 
                             key={tab} 
                             onClick={() => setActiveTab(tab)}
@@ -856,6 +907,138 @@ const ProductDashboard: React.FC<ProductDashboardProps> = ({ events, onClose, on
                                     <p className="text-[10px] text-slate-500 mt-3">Across N={productMetrics.totalUniqueParticipants} participants</p>
                                 </div>
                             </section>
+                        </div>
+                    )}
+
+                    {activeTab === 'probe_quality' && (
+                        <div className="space-y-8 animate-fade-in">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Probe Effectiveness by Type</h3>
+                                    <p className="text-[10px] text-slate-500 mt-1">
+                                        Aggregated from probe_successful / depth_delta — computed per-probe by analyzeProbeResponse, surfaced here instead of discarded.
+                                    </p>
+                                </div>
+                                <button onClick={fetchProbeEffectiveness} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors">
+                                    {probeEffLoading ? 'Loading…' : 'Refresh'}
+                                </button>
+                            </div>
+
+                            {probeEffError && <p className="text-sm text-rose-400">{probeEffError}</p>}
+                            {probeEffLoading && !probeEffectiveness && <p className="text-sm text-slate-500">Loading…</p>}
+
+                            {probeEffectiveness && (
+                                <>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-800">
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Completed Sessions Analyzed</p>
+                                            <p className="text-3xl font-black text-white">{probeEffectiveness.sessionsAnalyzed}</p>
+                                        </div>
+                                        <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-800">
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Sessions With At Least One Probe</p>
+                                            <p className="text-3xl font-black text-blue-400">{probeEffectiveness.sessionsWithProbes}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {probeEffectiveness.byProbeType.map(p => (
+                                            <div key={p.probeType} className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <span className="text-xs font-black text-white uppercase tracking-widest">{p.probeType}</span>
+                                                    <span className="text-[10px] text-slate-500 font-bold">n={p.count}</span>
+                                                </div>
+                                                {p.count === 0 ? (
+                                                    <p className="text-xs text-slate-600 italic">No data yet.</p>
+                                                ) : (
+                                                    <>
+                                                        <div className="flex items-center gap-3 mb-3">
+                                                            <div className="flex-1 h-2.5 bg-slate-900 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className={`h-full rounded-full ${p.successRate! >= 70 ? 'bg-emerald-500' : p.successRate! >= 40 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                                                    style={{ width: `${p.successRate}%` }}
+                                                                />
+                                                            </div>
+                                                            <span className="text-sm font-black text-white tabular-nums w-14 text-right">{p.successRate}%</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Depth Delta Distribution</p>
+                                                        <div className="flex gap-4 text-[11px] text-slate-400">
+                                                            <span className="text-emerald-400 font-bold">↑ {p.depthDelta!.increasedPct}%</span>
+                                                            <span className="text-slate-500 font-bold">= {p.depthDelta!.samePct}%</span>
+                                                            <span className="text-rose-400 font-bold">↓ {p.depthDelta!.decreasedPct}%</span>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-slate-600 italic">
+                                        "Success rate" = % of probes where the candidate's response was judged to add meaningful new content (probe_successful). Low-n probe types (small sample) should be read cautiously — same statistical-reliability caveat as cross-session trends elsewhere in this app.
+                                    </p>
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'cv_files' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Uploaded CVs</h3>
+                                    <p className="text-[10px] text-slate-500 mt-1">
+                                        The actual file a candidate uploaded, saved at upload time — independent of whether they went on to start a session. Most recent 200.
+                                    </p>
+                                </div>
+                                <button onClick={fetchCvFiles} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors">
+                                    {cvFilesLoading ? 'Loading…' : 'Refresh'}
+                                </button>
+                            </div>
+
+                            {cvFilesError && <p className="text-sm text-rose-400">{cvFilesError}</p>}
+                            {cvFilesLoading && cvFiles.length === 0 && <p className="text-sm text-slate-500">Loading…</p>}
+                            {!cvFilesLoading && !cvFilesError && cvFiles.length === 0 && (
+                                <p className="text-sm text-slate-600 italic">No CVs uploaded yet.</p>
+                            )}
+
+                            {cvFiles.length > 0 && (
+                                <div className="overflow-auto rounded-2xl border border-slate-800">
+                                    <table className="w-full text-xs">
+                                        <thead className="bg-slate-800/60 text-slate-400 uppercase tracking-widest text-[9px]">
+                                            <tr>
+                                                <th className="text-left p-3 font-black">Participant ID</th>
+                                                <th className="text-left p-3 font-black">Email</th>
+                                                <th className="text-left p-3 font-black">File</th>
+                                                <th className="text-left p-3 font-black">Type</th>
+                                                <th className="text-left p-3 font-black">Size</th>
+                                                <th className="text-left p-3 font-black">Uploaded</th>
+                                                <th className="text-left p-3 font-black"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {cvFiles.map(f => (
+                                                <tr key={f.id} className="border-t border-slate-800 hover:bg-slate-800/30">
+                                                    <td className="p-3 font-mono text-slate-300">{f.participantId ?? '—'}</td>
+                                                    <td className="p-3 text-slate-300">{f.email ?? '—'}</td>
+                                                    <td className="p-3 text-slate-300">{f.fileName}</td>
+                                                    <td className="p-3 text-slate-500">{f.fileMime === 'application/pdf' ? 'PDF' : f.fileMime.includes('word') || f.fileMime.includes('document') ? 'Word' : f.fileMime}</td>
+                                                    <td className="p-3 text-slate-500">{(f.fileSizeBytes / 1024).toFixed(0)} KB</td>
+                                                    <td className="p-3 text-slate-500">{new Date(f.createdAt).toLocaleString()}</td>
+                                                    <td className="p-3">
+                                                        <a
+                                                            href={`/api/cv-files/${encodeURIComponent(f.id)}/download`}
+                                                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-500 transition-all inline-block"
+                                                        >
+                                                            Download
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            <p className="text-[10px] text-slate-600 italic">
+                                No separate authentication on this view or the download link beyond however this dashboard itself is reached (Ctrl/Cmd+Shift+A) — same posture as every other admin route in this app (/api/participants, raw data log, etc.), not a new gap specific to CVs.
+                            </p>
                         </div>
                     )}
 

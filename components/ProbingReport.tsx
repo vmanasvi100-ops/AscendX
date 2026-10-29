@@ -65,14 +65,14 @@ Try saying: "${analysis.coaching_guidance?.example_phrase || 'N/A'}"
 
 ## LANGUAGE SIGNALS
 ### OWNERSHIP & IMPACT
-- Ownership & Agency: ${analysis.merit_vectors.autonomy >= 66 ? 'strong' : analysis.merit_vectors.autonomy >= 33 ? 'developing' : 'low'}
-- Skill Mastery: ${analysis.merit_vectors.competence >= 66 ? 'strong' : analysis.merit_vectors.competence >= 33 ? 'developing' : 'low'}
-- Team Impact: ${analysis.merit_vectors.relatedness >= 66 ? 'strong' : analysis.merit_vectors.relatedness >= 33 ? 'developing' : 'low'}
+- Ownership Language: ${(analysis.behavioral_evidence_vectors?.personal_agency ?? analysis.merit_vectors.autonomy) >= 66 ? 'strong' : (analysis.behavioral_evidence_vectors?.personal_agency ?? analysis.merit_vectors.autonomy) >= 33 ? 'developing' : 'low'}
+- Skill Specificity: ${(analysis.behavioral_evidence_vectors?.skill_specificity ?? analysis.merit_vectors.competence) >= 66 ? 'strong' : (analysis.behavioral_evidence_vectors?.skill_specificity ?? analysis.merit_vectors.competence) >= 33 ? 'developing' : 'low'}
+- Impact Articulation: ${(analysis.behavioral_evidence_vectors?.impact_articulation ?? analysis.merit_vectors.relatedness) >= 66 ? 'strong' : (analysis.behavioral_evidence_vectors?.impact_articulation ?? analysis.merit_vectors.relatedness) >= 33 ? 'developing' : 'low'}
 
 ### RESPONSE QUALITY
-- Professional Vocabulary: ${analysis.chc_signals.gc}
-- Logical Reasoning: ${analysis.chc_signals.gf}
-- Evidence & Precision: ${analysis.chc_signals.gq}
+- Domain Vocabulary: ${analysis.response_quality_signals?.domain_language ?? analysis.chc_signals.gc}
+- Adapted Under Probing: ${analysis.response_quality_signals?.adaptive_reasoning ?? analysis.chc_signals.gf}
+- Evidence Specificity: ${analysis.response_quality_signals?.evidence_specificity ?? analysis.chc_signals.gq}
 
 ## STAR PROGRESSION
 ${Object.entries(analysis.star_status).map(([k, v]) => `- ${k.toUpperCase()}: ${(v as string).replace('_', ' ')}`).join('\n')}
@@ -277,26 +277,30 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
               <div className="space-y-4">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ownership & Impact Signals</h4>
                 <div className="space-y-4">
-                  {Object.entries(analysis.merit_vectors).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => {
-                    const numScore = score as number;
-                    const strength = numScore >= 66 ? 'strong' : numScore >= 33 ? 'developing' : 'low';
-                    const isWeakest = analysis.merit_vectors.lowest_vector === vector;
-                    return (
-                      <div key={vector} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
-                            {vector === 'autonomy' ? 'Ownership & Agency' : vector === 'competence' ? 'Skill Mastery' : 'Team Impact'}
+                  {(() => {
+                    const bev = analysis.behavioral_evidence_vectors
+                      ?? { personal_agency: analysis.merit_vectors.autonomy, skill_specificity: analysis.merit_vectors.competence, impact_articulation: analysis.merit_vectors.relatedness, lowest_vector: (analysis.merit_vectors.lowest_vector === 'autonomy' ? 'personal_agency' : analysis.merit_vectors.lowest_vector === 'competence' ? 'skill_specificity' : 'impact_articulation') as 'personal_agency' | 'skill_specificity' | 'impact_articulation' };
+                    return Object.entries(bev).filter(([k]) => k !== 'lowest_vector').map(([vector, score]) => {
+                      const numScore = score as number;
+                      const strength = numScore >= 66 ? 'strong' : numScore >= 33 ? 'developing' : 'low';
+                      const isWeakest = bev.lowest_vector === vector;
+                      return (
+                        <div key={vector} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-700">
+                              {vector === 'personal_agency' ? 'Ownership & Agency' : vector === 'skill_specificity' ? 'Skill Mastery' : 'Team Impact'}
+                            </span>
+                            <p className="text-[10px] font-bold text-slate-500">
+                              {vector === 'personal_agency' ? 'Personal drive and initiative language.' : vector === 'skill_specificity' ? 'Specific execution and skill evidence.' : 'Collaborative and business impact language.'}
+                            </p>
+                          </div>
+                          <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${isWeakest ? 'bg-amber-100 text-amber-700' : strength === 'strong' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {isWeakest ? 'develop' : strength}
                           </span>
-                          <p className="text-[10px] font-bold text-slate-500">
-                            {vector === 'autonomy' ? 'Personal drive and initiative language.' : vector === 'competence' ? 'Specific execution and skill evidence.' : 'Collaborative and business impact language.'}
-                          </p>
                         </div>
-                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${isWeakest ? 'bg-amber-100 text-amber-700' : strength === 'strong' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                          {isWeakest ? 'develop' : strength}
-                        </span>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
@@ -304,21 +308,25 @@ ${analysis.coaching_tip || 'No tip generated for this turn.'}
               <div className="space-y-4">
                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Response Quality Signals</h4>
                 <div className="space-y-4">
-                  {Object.entries(analysis.chc_signals).filter(([k]) => k !== 'lowest_signal').map(([signal, level]) => (
-                    <div key={signal} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                          {signal === 'gc' ? 'Professional Vocabulary' : signal === 'gf' ? 'Logical Reasoning' : 'Evidence & Precision'}
+                  {(() => {
+                    const rqs = analysis.response_quality_signals
+                      ?? { domain_language: analysis.chc_signals.gc, adaptive_reasoning: analysis.chc_signals.gf, evidence_specificity: analysis.chc_signals.gq, lowest_signal: 'domain_language' as const };
+                    return Object.entries(rqs).filter(([k]) => k !== 'lowest_signal').map(([signal, level]) => (
+                      <div key={signal} className="p-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            {signal === 'domain_language' ? 'Domain Vocabulary' : signal === 'adaptive_reasoning' ? 'Adapted Under Probing' : 'Evidence Specificity'}
+                          </span>
+                          <p className="text-[10px] font-bold text-slate-800">
+                            {signal === 'domain_language' ? 'Specific, accurate professional language.' : signal === 'adaptive_reasoning' ? 'Built on the answer rather than repeating it when probed.' : 'Concrete data, metrics, or named outcomes.'}
+                          </p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' : level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {level as string}
                         </span>
-                        <p className="text-[10px] font-bold text-slate-800">
-                          {signal === 'gc' ? 'Specific, accurate professional language.' : signal === 'gf' ? 'Logic flow in complex situations.' : 'Concrete data, metrics, or named outcomes.'}
-                        </p>
                       </div>
-                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${level === 'strong' ? 'bg-emerald-100 text-emerald-700' : level === 'moderate' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {level as string}
-                      </span>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
             </div>

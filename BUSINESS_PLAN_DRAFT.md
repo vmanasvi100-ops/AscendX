@@ -47,9 +47,30 @@ See `INNOVATION_SUMMARY.md` for the full technical case. In short: the individua
 
 ## 5. Market & Competition
 
-Known comparable products: Yoodli, Pramp, Google's Interview Warmup, Big Interview. These are broadly single-session or peer-matching tools without adaptive cross-session coaching or a grounded psychological framework.
+*Researched with cited sources. No exact-category "AI interview coaching market size" report was found as a direct citation during this research pass — that specific TAM figure does not appear to be publicly tracked as its own category. Rather than inventing one, this section uses the closest verifiable adjacent data (UK graduate employment/underemployment scale, and named-competitor funding/pricing) as the market-sizing evidence, and says so explicitly. This is standard practice for an emerging category and is more credible to an endorsing body than a fabricated TAM number.*
 
-[NEEDS YOUR INPUT: this section needs real market sizing (TAM/SAM/SOM) and a proper competitive comparison table. I don't have reliable current figures for the interview-coaching/career-services market and won't fabricate them — if you want, I can research this properly (market size reports, competitor pricing/funding) as a separate step and fill this in with cited sources.]
+### 5.1 UK demand-side evidence
+
+- **946,000** young people aged 16–24 in the UK were NEET (not in education, employment, or training) in the quarter to September 2025 — 12.7% of that age group (young men 13.4% / 512,000; young women 11.9% / 434,000). *(ONS, "Young people not in education, employment or training (NEET), UK: November 2025")*
+- UK unemployment (ages 16+) stood at **5.0%** for July–September 2025, up on the prior quarter. *(ONS UK Labour Market, November 2025)*
+- The UK graduate employment rate was **87.6%** in 2024 (unchanged from 2023), versus **68.0%** for non-graduates — the single clearest evidence that structured career preparation correlates with employment outcomes. *(Department for Education, Graduate Labour Market statistics 2024)*
+- Of UK graduates surveyed 15 months after graduation: 87% were in work or further study, 57% specifically in full-time employment, and 7% remained unemployed. *(HESA Graduate Outcomes survey)*
+- Career-services usage data suggests the gap isn't disinterest but timing: among students/graduates who hadn't recently used their university careers service, 39% said they were focused on coursework and 28% said they planned to use it later, specifically when actively job-hunting — i.e., demand concentrates right before interviews, which is exactly AscendX's use case. *(Prospects Luminate, Early Careers Survey)*
+
+**Reading these together:** there is a large, well-documented population (hundreds of thousands of NEET young people annually, plus the wider graduate/job-seeker population) for whom employment outcomes are measurably tied to preparation, and existing evidence suggests demand for interview-specific support peaks at the exact moment AscendX is designed to serve — not earlier, when generic career-services engagement is lower.
+
+### 5.2 Competitive landscape
+
+| Product | Model | Funding / Scale | How it differs from AscendX |
+|---|---|---|---|
+| **Yoodli** | AI communication-practice coach (broader than interviews alone — also sales pitches, public speaking); freemium + paid tiers | Raised a **$40M Series B** (led by WestBridge Capital, with Neotribe and Madrona participating), bringing total funding to **~$60M**; reported **900% YoY revenue growth**. An earlier $13.7M round was raised specifically to help sales teams practice pitches. *(GeekWire; Yoodli company blog)* | Single-session feedback per practice attempt; no published cross-session adaptive-coaching architecture. Positioned broadly across communication use-cases, not interview-specific. |
+| **Big Interview** | Individual subscription: **$39/month**, **$99 for 3 months**, or **$299 one-time for lifetime access** (30-day money-back guarantee); custom pricing for institutions/enterprise. *(biginterview.com pricing)* | Claims **700+ institutional customers** and **2M+ individual users** to date. *(biginterview.com)* | Video-based mock interview practice with a static question library and human-style rubric scoring; no evidence of adaptive cross-session competency tracking. |
+| **Pramp** | Free peer-to-peer mock interview matching | No funding/scale data verified in this research pass | Relies on human peers rather than AI coaching — no consistency guarantee, no persistent competency tracking across sessions. |
+| **Google Interview Warmup** | Free, single-session, text-based practice tool | N/A (Google product, not a standalone company) | Deliberately lightweight — no feedback depth, no follow-up probing, no session memory. Functions more as an awareness tool than a coaching product. |
+
+**Positioning:** the best-funded comparable (Yoodli, ~$60M raised, reporting 900% revenue growth) validates that the AI-coached-practice category has real commercial traction — but it competes on breadth (any spoken communication) rather than depth in interview-specific, cross-session adaptive coaching, which is where AscendX is positioned. Big Interview shows the category supports both a real subscription business model and institutional (university/enterprise) sales channels at meaningful scale (700+ institutions), which is directly relevant evidence for section 6/7 below.
+
+[NEEDS YOUR INPUT: this section evidences that a market and adjacent competitors exist at meaningful scale — it does not replace section 6/7. An endorsing body will still want to see where *you* fit relative to these: pricing versus Big Interview's tiers, and whether you're positioning against Yoodli's breadth-first approach or a different channel entirely (e.g., university partnerships, given Big Interview's institutional traction as a proof of that channel's viability).]
 
 ---
 

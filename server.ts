@@ -14,6 +14,9 @@ import analyticsRoutes from "./backend/routes/analyticsEvents.js";
 import snapshotRoutes from "./backend/routes/snapshots.js";
 import participantRoutes from "./backend/routes/participants.js";
 import aiRoutes from "./backend/routes/ai.js";
+import coachingThreadRoutes from "./backend/routes/coachingThreads.js";
+import cvAlignmentRoutes from "./backend/routes/cvAlignment.js";
+import cvFileRoutes from "./backend/routes/cvFiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +40,9 @@ async function startServer() {
   app.use("/api/snapshots", snapshotRoutes);
   app.use("/api/participants", participantRoutes);
   app.use("/api/ai", aiRoutes);
+  app.use("/api/coaching-threads", coachingThreadRoutes);
+  app.use("/api/cv-alignment", cvAlignmentRoutes);
+  app.use("/api/cv-files", cvFileRoutes);
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {

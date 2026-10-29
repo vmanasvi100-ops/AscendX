@@ -4,13 +4,20 @@ import { RecordingStatus, AnalyticsEventType, TimerDisplay, Question, Probe, Pro
 import { generateProbe, analyzeProbeResponse, generateQuestionSummary } from '../services/probingService';
 import { generateDetailedFeedback } from '../services/feedbackService';
 import { generateContent } from '../services/aiClient';
+import { saveClip, MAX_CLIP_SECONDS } from '../services/reflectionLibrary';
+import { TALK_IT_THROUGH_REVIEWED } from '../services/talkItThrough';
+import TalkItThrough from './TalkItThrough';
+import { explainQuestionPart } from '../services/questionExplainer';
+import { computeFadeDecision } from '../services/clearModeFade';
+import VisualExplainer from './VisualExplainer';
 import ProbingPipeline from './ProbingPipeline';
 import ProbingReport from './ProbingReport';
 import QuestionReport from './QuestionReport';
 import ImprovementPlan from './ImprovementPlan';
+import SessionHistory from './SessionHistory';
 import ELCQuestionTrace from './ELCQuestionTrace';
 import { AnimatePresence } from 'motion/react';
-import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, Sparkles, Scale, Layers, ShieldCheck, Target } from 'lucide-react';
+import { Brain, Award, BookOpen, ShieldAlert, CheckCircle2, TrendingUp, Download, FileText, Sparkles, Scale, Layers, ShieldCheck, Target, History, MessageCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { tourSteps } from '../data';
@@ -26,6 +33,12 @@ interface SessionEntry {
     probeAnalysis: ProbeAnalysis | null;
     act1Analysis?: ProbeAnalysis | null;  // ZPD lower boundary — unprobed (Vygotsky 1978)
     summaryReport: QuestionSummaryReport | null;
+    // Added for Clear Mode fade-level tracking (see clearModeFade.ts): whether the candidate opened
+    // "Show me what they're looking for" on this answer, and the question's type, so fade-level
+    // up/down decisions can be computed per type from existing sessionLog data without a new store.
+    decoderUsed?: boolean;
+    explainerUsed?: boolean;
+    questionType?: 'behavioural' | 'motivational' | 'situational' | 'knowledge-probe';
 }
 type VideoState = 'standard' | 'hidden';
 type AspectRatio = '9/16' | '2/3' | '3/4' | '4/5' | '3/2' | '16/10' | '16/5' | '16/7' | '20/7';
@@ -302,9 +315,22 @@ interface AscendPlatformProps {
     logEvent: (type: AnalyticsEventType, metadata?: Record<string, any>) => void;
     onExit: () => void;
     email?: string;
+    consentId?: string | null;
 }
 
-const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email = '' }) => {
+// Every question's requirements[].text is AI-generated as "Short Label: longer explanation"
+// (the coaching-prompt template in questionService.ts is built that way for every question type —
+// STAR, Who/Journey/Edge/Direction, Context/Role/Actions/Outcome, Principle/Application/
+// Trade-offs/Evidence). Clear Mode's checklist and one-at-a-time views need the short label, not
+// the full paragraph, to actually read as clean/scannable rather than a wall of text. The 40-char
+// guard keeps this from misfiring on a colon that's just part of a sentence rather than a label.
+const splitRequirementLabel = (text: string): { label: string | null; detail: string } => {
+    const idx = text.indexOf(':');
+    if (idx === -1 || idx > 40) return { label: null, detail: text };
+    return { label: text.slice(0, idx).trim(), detail: text.slice(idx + 1).trim() };
+};
+
+const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email = '', consentId = null }) => {
     const {
         videoEnabled,
         setVideoEnabled,
@@ -330,6 +356,11 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         saveMesoAccumulator,
         computeMesoDelta,
         deriveUpdatedCandidateProfile,
+        clearModeEnabled,
+        clearModeAppearance,
+        setClearModeAppearance,
+        visualExplanationsTrigger,
+        saveClips,
     } = useSettings();
 
     const effectiveCandidateProfile = React.useMemo(() => {
@@ -337,7 +368,28 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         return patch ? { ...candidateProfile, ...patch } : candidateProfile;
     }, [candidateProfile, mesoAccumulator]);
     const [starPhase, setStarPhase] = useState(0);
+    // Clear Mode — purely presentational, per-question state. Never gates submission: the
+    // candidate can submit their answer regardless of which part is showing or whether the
+    // decoder has been opened (their choice always wins, per the Clear Mode design).
+    const [clearModePartIndex, setClearModePartIndex] = useState(0);
+    const [decoderRevealed, setDecoderRevealed] = useState(false);
+    // Same per-question reset pattern as decoderRevealed — tracked so Clear Mode fade-level
+    // decisions (clearModeFade.ts) can require unaided coverage ("without the decoder or the
+    // visual explainer") rather than just "without the decoder."
+    const [explainerUsedThisQuestion, setExplainerUsedThisQuestion] = useState(false);
+    // Set by the Clear Mode fade-level effect further down (after currentQuestion exists).
+    const [fadeLevelMessage, setFadeLevelMessage] = useState<string | null>(null);
+    const [questionExplanation, setQuestionExplanation] = useState<string | null>(null);
+    const [isExplaining, setIsExplaining] = useState(false);
+    const [isTalkItThroughOpen, setIsTalkItThroughOpen] = useState(false);
+    const [isVisualExplainerOpen, setIsVisualExplainerOpen] = useState(false);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+    useEffect(() => {
+        setClearModePartIndex(0);
+        setDecoderRevealed(false);
+        setExplainerUsedThisQuestion(false);
+        setFadeLevelMessage(null);
+    }, [currentQuestionIndex]);
     const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>('idle');
 
     const [transcript, setTranscript] = useState<string>("");
@@ -349,6 +401,13 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
     const audioContextRef = useRef<AudioContext | null>(null);
 
     const [videoState, setVideoState] = useState<VideoState>('standard');
+    // Reflection Library clip capture — only active when the candidate opted in (saveClips ===
+    // 'device'). Independent of the transcription pipeline below (both read the same `stream`,
+    // neither interferes with the other); this just also records the raw media locally.
+    const clipRecorderRef = useRef<MediaRecorder | null>(null);
+    const clipChunksRef = useRef<Blob[]>([]);
+    const clipAutoStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const clipMetaRef = useRef<{ questionText: string; transcript: string } | null>(null);
     const [isTimerHidden, setIsTimerHidden] = useState(false);
 
     const phaseStartTimestamp = useRef<number>(Date.now());
@@ -372,6 +431,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
     const [isMicOpening, setIsMicOpening] = useState(false);
     const [reassuringMessage, setReassuringMessage] = useState("");
     const [probeHistory, setProbeHistory] = useState<string[]>([]);
+    const [feedbackSeekingCount, setFeedbackSeekingCount] = useState(0); // candidate-initiated Deep Probe requests this session — feedback-seeking, not scaffold dependency
 
     // Learning Intention — pre-session goal set by student (criterion-referenced assessment)
     const [learningIntention, setLearningIntention] = useState<string>('');
@@ -403,6 +463,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
     // Human-oversight flag mechanism (GDPR Article 22 / EU AI Act) — backend/routes/flags.ts
     const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
     const [showFlagModal, setShowFlagModal] = useState(false);
+    const [showSessionHistory, setShowSessionHistory] = useState(false);
     const [flagSection, setFlagSection] = useState('overall');
     const [flagNote, setFlagNote] = useState('');
     const [flagSubmitting, setFlagSubmitting] = useState(false);
@@ -583,7 +644,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                     for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
                     const base64 = btoa(binary);
                     const r = await generateContent({
-                        model: 'gemini-2.0-flash',
+                        model: 'gemini-3-flash-preview',
                         contents: [{ parts: [
                             { text: 'Transcribe this audio recording exactly as spoken. If the audio is silent or inaudible, say so clearly.' },
                             { inlineData: { mimeType: blob.type || 'audio/webm', data: base64 } }
@@ -854,6 +915,54 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         setIsTranscribing(true);
     };
 
+    // Starts a local-only clip recording alongside the transcription pipeline — only ever called
+    // when the candidate opted in (saveClips === 'device'). Records video if the camera is on and
+    // not hidden, audio-only otherwise ("video if the camera was on, otherwise audio"). Saves to
+    // IndexedDB on stop; never uploaded, never analysed beyond the transcript already in use for
+    // live coaching.
+    const startClipRecording = (mediaStream: MediaStream) => {
+        const hasVideo = mediaStream.getVideoTracks().length > 0 && videoState !== 'hidden';
+        const tracks = hasVideo ? mediaStream.getTracks() : mediaStream.getAudioTracks();
+        if (tracks.length === 0) return;
+        const recordingStream = new MediaStream(tracks);
+        const candidates = hasVideo
+            ? ['video/webm;codecs=vp8,opus', 'video/webm']
+            : ['audio/webm;codecs=opus', 'audio/webm'];
+        const mimeType = candidates.find(t => MediaRecorder.isTypeSupported(t));
+        let recorder: MediaRecorder;
+        try {
+            recorder = mimeType ? new MediaRecorder(recordingStream, { mimeType }) : new MediaRecorder(recordingStream);
+        } catch (err) {
+            console.error('Clip recording unavailable:', err);
+            return;
+        }
+        clipChunksRef.current = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunksRef.current.push(e.data); };
+        recorder.onstop = async () => {
+            const chunks = clipChunksRef.current;
+            clipChunksRef.current = [];
+            const meta = clipMetaRef.current;
+            clipMetaRef.current = null;
+            if (clipAutoStopTimeoutRef.current) {
+                clearTimeout(clipAutoStopTimeoutRef.current);
+                clipAutoStopTimeoutRef.current = null;
+            }
+            recordingStream.getTracks().forEach(t => t.stop());
+            if (!meta || chunks.length === 0 || meta.transcript.trim().length < 15) return;
+            try {
+                const blob = new Blob(chunks, { type: recorder.mimeType || (hasVideo ? 'video/webm' : 'audio/webm') });
+                await saveClip({ questionText: meta.questionText, transcript: meta.transcript, mimeType: blob.type, blob });
+            } catch (err) {
+                console.error('Failed to save reflection clip:', err);
+            }
+        };
+        recorder.start();
+        clipRecorderRef.current = recorder;
+        clipAutoStopTimeoutRef.current = setTimeout(() => {
+            if (clipRecorderRef.current?.state === 'recording') clipRecorderRef.current.stop();
+        }, MAX_CLIP_SECONDS * 1000);
+    };
+
     const handleRecord = async () => {
         if (recordingStatus === 'idle') {
             if (!stream) return;
@@ -867,6 +976,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
 
             setRecordingStatus('recording');
             startTranscription(stream);
+            if (saveClips === 'device') startClipRecording(stream);
         } else {
             setRecordingStatus('idle');
             if (audioContextRef.current) {
@@ -874,6 +984,14 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 audioContextRef.current = null;
             }
             setIsTranscribing(false);
+            if (clipRecorderRef.current && clipRecorderRef.current.state !== 'inactive') {
+                clipMetaRef.current = {
+                    questionText: currentQuestion.text,
+                    transcript: transcript.slice(lastPhaseTranscriptLength.current),
+                };
+                clipRecorderRef.current.stop();
+                clipRecorderRef.current = null;
+            }
 
             // Trigger Analysis if probing is active
             if (isProbingActive && transcript.length > probingTranscript.length) {
@@ -883,7 +1001,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
         }
     };
 
-    const triggerProbing = async () => {
+    const triggerProbing = async (initiatedBy: 'system' | 'candidate' = 'system') => {
         setIsProbingActive(true);
         setIsGeneratingProbe(true);
         setActiveTab('plan');
@@ -912,9 +1030,11 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 candidateProfile: effectiveCandidateProfile,
                 mesoAccumulator,
             });
-            setCurrentProbe(probe);
+            const taggedProbe: Probe = { ...probe, initiated_by: initiatedBy };
+            setCurrentProbe(taggedProbe);
             setProbeHistory(prev => [...prev, probe.probe]);
-            logEvent('probe_used', { questionIndex: currentQuestionIndex, starPhase, probeType: probe.probe_type });
+            if (initiatedBy === 'candidate') setFeedbackSeekingCount(prev => prev + 1);
+            logEvent('probe_used', { questionIndex: currentQuestionIndex, starPhase, probeType: probe.probe_type, initiatedBy });
         } catch (err) {
             console.error("Failed to generate probe:", err);
         } finally {
@@ -932,6 +1052,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 targetRole,
                 companyName,
                 question: currentQuestion.text,
+                competency: currentQuestion.competency,
                 probe: currentProbe.probe,
                 probeType: currentProbe.probe_type,
                 probeRationale: currentProbe.rationale,
@@ -975,6 +1096,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                         analyzeProbeResponse({
                             targetRole, companyName,
                             question: currentQuestion.text,
+                            competency: currentQuestion.competency,
                             response: transcript,
                             scaffoldPhase: 1,
                         }).then(a => ({ ...a, zpd_boundary_type: 'act_one' as const })).catch(() => null),
@@ -1012,6 +1134,9 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 probeAnalysis: probeAnalysis,
                 act1Analysis: act1Analysis,   // ZPD lower boundary — unprobed performance (Vygotsky 1978)
                 summaryReport: summaryReport,
+                decoderUsed: decoderRevealed,
+                explainerUsed: explainerUsedThisQuestion,
+                questionType: currentQuestion.questionType ?? 'behavioural',
             }]);
 
             const starMap = (v: string | undefined) =>
@@ -1026,8 +1151,11 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                 starTask:      starMap(st?.task),
                 starAction:    starMap(st?.action),
                 starResult:    starMap(st?.result),
-                // Spoken response — linked only to anonymous participant ID, never to email.
-                // Basic scrub removes email addresses and phone numbers before storage.
+                // Spoken response — this event payload carries only participantId, not email directly.
+                // That ID is pseudonymous, not anonymous: it IS joinable to email elsewhere
+                // (registered_participants.participant_id, for CSV export correlation) — see
+                // backend/routes/participants.ts. Don't describe this as "anonymous" downstream.
+                // Basic scrub removes email addresses and phone numbers before storage regardless.
                 responseText: newSegment
                     .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[EMAIL]')
                     .replace(/(\+?\d[\d\s\-().]{7,}\d)/g, '[PHONE]')
@@ -1099,6 +1227,7 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
                     targetRole,
                     companyName,
                     question: currentQuestion.text,
+                    competency: currentQuestion.competency,
                     probe: currentProbe?.probe || "",
                     probeType: currentProbe?.probe_type as any || "CLARIFYING",
                     probeRationale: currentProbe?.rationale || "",
@@ -1126,88 +1255,94 @@ const AscendPlatform: React.FC<AscendPlatformProps> = ({ logEvent, onExit, email
             return;
         }
 
-        // Standard STAR Progression
-        if (starPhase < 3) {
-            setStarPhase(prev => prev + 1);
-            lastPhaseTranscriptLength.current = transcript.length;
-            phaseStartTimestamp.current = Date.now();
-        } else {
-            const isLastQuestion = currentQuestionIndex >= activeQuestions.length - 1;
-            if (isLastQuestion) {
-                // If more questions are still being generated, log this question then pause
-                if (!questionsFinalized) {
-                    waitingAtLength.current = activeQuestions.length;
-                    lastPhaseTranscriptLength.current = transcript.length;
-                    setSessionLog(prev => [...prev, {
-                        questionIndex: currentQuestionIndex,
-                        questionText: currentQuestion.text,
-                        starPhaseReached: starPhase,
-                        transcriptSlice: transcript,
-                        probe: currentProbe,
-                        probeAnalysis: probeAnalysis,
-                        summaryReport: null,
-                    }]);
-                    setWaitingForMoreQuestions(true);
-                    return;
-                }
-
-                // Truly the last question — show reassuring message, generate insight, switch to Insights
-                // NEVER advance question index or generate a new question here
-                if (!lastQuestionCompleted && !isGeneratingFeedback) {
-                    setReassuringMessage("You have completed your final question. We are now analysing your last response and compiling your full session report. This may take a moment — your effort and thought are worth the wait.");
-                    lastPhaseTranscriptLength.current = transcript.length;
-
-                    // Generate per-question summary inline (without calling generateAndLog which would advance the index)
-                    setIsGeneratingProbe(true);
-                    let summaryReport: QuestionSummaryReport | null = null;
-                    if (transcript.trim().length >= 20) {
-                        try {
-                            summaryReport = await generateQuestionSummary({
-                                accumulator: {
-                                    questionId: currentQuestion.text,
-                                    transcript: transcript,
-                                    phaseAnalyses: [],
-                                    probeAnalyses: probeAnalysis ? [{ ...probeAnalysis, zpd_boundary_type: 'probed' as const }] : [],
-                                    timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
-                                    responseDurations: {
-                                        actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
-                                        probes: [],
-                                    },
-                                },
-                                targetRole,
-                                companyName,
-                                cvSummary: cvText || undefined,
-                                jobDescription: jobDescription || undefined,
-                            });
-                        } catch (err) {
-                            console.error('Failed to generate last question summary:', err);
-                        }
-                    }
-                    setIsGeneratingProbe(false);
-
-                    setSessionLog(prev => [...prev, {
-                        questionIndex: currentQuestionIndex,
-                        questionText: currentQuestion.text,
-                        starPhaseReached: starPhase,
-                        transcriptSlice: transcript,
-                        probe: currentProbe,
-                        probeAnalysis: probeAnalysis,
-                        summaryReport: summaryReport,
-                    }]);
-
-                    // Show the last question insight
-                    setActiveTab('report');
-
-                    // Start final report silently in background — user clicks Finish Session to navigate to it
-                    handleGenerateFinalFeedback();
-
-                    setLastQuestionCompleted(true);
-                }
-            } else if (decisionCountdown === 0) {
-                setDecisionCountdown(3);
-                triggerProbing();
+        // Free-form answer, every coaching mode: phase cueing is removed entirely so candidates
+        // answer once, naturally, and submit on the first click of this button. Structure (STAR,
+        // WHO/JOURNEY/EDGE/DIRECTION, etc.) is assessed after the fact, never cued live — forcing a
+        // live structure both risks manufacturing rehearsed-sounding answers and penalises candidates
+        // whose natural, credible account doesn't segment into the imposed phases. starPhase is no
+        // longer advanced; it stays at its initial value and is kept only where other code still
+        // reads it as metadata (session log entries, etc).
+        const isLastQuestion = currentQuestionIndex >= activeQuestions.length - 1;
+        if (isLastQuestion) {
+            // If more questions are still being generated, log this question then pause
+            if (!questionsFinalized) {
+                waitingAtLength.current = activeQuestions.length;
                 lastPhaseTranscriptLength.current = transcript.length;
+                setSessionLog(prev => [...prev, {
+                    questionIndex: currentQuestionIndex,
+                    questionText: currentQuestion.text,
+                    starPhaseReached: starPhase,
+                    transcriptSlice: transcript,
+                    probe: currentProbe,
+                    probeAnalysis: probeAnalysis,
+                    summaryReport: null,
+                    decoderUsed: decoderRevealed,
+                    explainerUsed: explainerUsedThisQuestion,
+                    questionType: currentQuestion.questionType ?? 'behavioural',
+                }]);
+                setWaitingForMoreQuestions(true);
+                return;
             }
+
+            // Truly the last question — show reassuring message, generate insight, switch to Insights
+            // NEVER advance question index or generate a new question here
+            if (!lastQuestionCompleted && !isGeneratingFeedback) {
+                setReassuringMessage("You have completed your final question. We are now analysing your last response and compiling your full session report. This may take a moment — your effort and thought are worth the wait.");
+                lastPhaseTranscriptLength.current = transcript.length;
+
+                // Generate per-question summary inline (without calling generateAndLog which would advance the index)
+                setIsGeneratingProbe(true);
+                let summaryReport: QuestionSummaryReport | null = null;
+                if (transcript.trim().length >= 20) {
+                    try {
+                        summaryReport = await generateQuestionSummary({
+                            accumulator: {
+                                questionId: currentQuestion.text,
+                                transcript: transcript,
+                                phaseAnalyses: [],
+                                probeAnalyses: probeAnalysis ? [{ ...probeAnalysis, zpd_boundary_type: 'probed' as const }] : [],
+                                timerFramingCondition: (timerFramingCondition as TimerFramingCondition) || 'elapsed',
+                                responseDurations: {
+                                    actOne: Math.round((Date.now() - phaseStartTimestamp.current) / 1000),
+                                    probes: [],
+                                },
+                            },
+                            targetRole,
+                            companyName,
+                            cvSummary: cvText || undefined,
+                            jobDescription: jobDescription || undefined,
+                        });
+                    } catch (err) {
+                        console.error('Failed to generate last question summary:', err);
+                    }
+                }
+                setIsGeneratingProbe(false);
+
+                setSessionLog(prev => [...prev, {
+                    questionIndex: currentQuestionIndex,
+                    questionText: currentQuestion.text,
+                    starPhaseReached: starPhase,
+                    transcriptSlice: transcript,
+                    probe: currentProbe,
+                    probeAnalysis: probeAnalysis,
+                    summaryReport: summaryReport,
+                    decoderUsed: decoderRevealed,
+                    explainerUsed: explainerUsedThisQuestion,
+                    questionType: currentQuestion.questionType ?? 'behavioural',
+                }]);
+
+                // Show the last question insight
+                setActiveTab('report');
+
+                // Start final report silently in background — user clicks Finish Session to navigate to it
+                handleGenerateFinalFeedback();
+
+                setLastQuestionCompleted(true);
+            }
+        } else if (decisionCountdown === 0) {
+            setDecisionCountdown(3);
+            triggerProbing();
+            lastPhaseTranscriptLength.current = transcript.length;
         }
     };
 
@@ -1223,6 +1358,9 @@ if (recordingStatus === 'recording') await handleRecord();
                 probe: currentProbe,
                 probeAnalysis: probeAnalysis,
                 summaryReport: null,
+                decoderUsed: decoderRevealed,
+                explainerUsed: explainerUsedThisQuestion,
+                questionType: currentQuestion.questionType ?? 'behavioural',
             }]);
             setActiveTab('plan');
             setReassuringMessage("The next question is on its way. Be focused, Be ready");
@@ -1324,6 +1462,7 @@ if (recordingStatus === 'recording') await handleRecord();
                 mesoAccumulator,
                 sessionCDLProfile,
                 learningIntention: learningIntention.trim() || null,
+                feedbackSeekingCount,
             });
             setDetailedFeedback(feedback);
             // ── Wire cross-session ELC tracking: build SessionRecord from this session ──
@@ -1360,6 +1499,7 @@ if (recordingStatus === 'recording') await handleRecord();
               selfReportedAnxietyLevel: preSessionAnswer ?? '',
               forwardOrientationNotes: feedback.careerDevelopment?.nextSteps ?? [],
               starComponentsReached: starReached,
+              feedbackSeekingCount,
             };
             const updatedSessions = [...(mesoAccumulator?.sessions ?? []), record];
             const updatedMeso = {
@@ -1369,17 +1509,37 @@ if (recordingStatus === 'recording') await handleRecord();
               lastUpdated: Date.now(),
             };
             saveMesoAccumulator(updatedMeso);
+            // Layer A — candidate-safe subset only (mirrors the Tier split used everywhere else:
+            // behavioural language, no raw rubrics/merit-vectors/CHC data). This is what a
+            // session-history view would read back, so it must never carry Layer-B content.
+            const layerA = {
+              performanceSummary: feedback.performanceSummary,
+              overallStarSynthesis: feedback.overallStarSynthesis,
+              strengths: feedback.strengths,
+              weaknesses: feedback.weaknesses,
+              starAnalysis: feedback.starAnalysis,
+              keywordCoverage: feedback.keywordCoverage,
+              actionableSuggestions: feedback.actionableSuggestions,
+              careerDevelopment: feedback.careerDevelopment,
+            };
             fetch('/api/sessions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 participantId,
+                consentId,
+                email,
                 companyName,
                 targetRole,
                 jobDescription,
                 cvText,
                 settings: { condition },
                 questions: activeQuestions.map(q => ({ text: q.text, competency: q.competency })),
+                sessionLog,
+                layerA,
+                maskedTranscript: typeof feedback.maskedTranscript === 'object' ? (feedback.maskedTranscript as any)?.text : feedback.maskedTranscript,
+                mesoRecord: record,
+                status: 'complete',
               }),
             }).then(r => r.json()).then(d => { if (d.sessionId) setBackendSessionId(d.sessionId); }).catch(() => {});
         } catch (err) {
@@ -1416,7 +1576,51 @@ if (recordingStatus === 'recording') await handleRecord();
     }, [stream, videoState]);
 
     const currentQuestion = activeQuestions[currentQuestionIndex] || activeQuestions[0];
-    const currentRequirement = currentQuestion.requirements[starPhase];
+
+    // Clear Mode fade levels (services/clearModeFade.ts) — automatic progression between support
+    // levels as the candidate shows unaided coverage, or a step back if they're struggling.
+    // Purely a reaction to sessionLog growing; never touches answer-submission logic itself. The
+    // candidate's own choice in Support Settings always takes effect immediately regardless, so
+    // this can only ever propose a change before the NEXT answer, never override one mid-answer.
+    useEffect(() => {
+        if (!clearModeEnabled || sessionLog.length === 0 || !currentQuestion) return;
+        const upcomingType = currentQuestion.questionType ?? 'behavioural';
+        const historyForType = sessionLog.filter(e => (e.questionType ?? 'behavioural') === upcomingType);
+        const decision = computeFadeDecision(historyForType, clearModeAppearance);
+        if (decision.newAppearance && decision.newAppearance !== clearModeAppearance) {
+            setClearModeAppearance(decision.newAppearance);
+            setFadeLevelMessage(decision.message);
+            logEvent('support_used', {
+                supportType: 'clear_mode_fade_level',
+                from: clearModeAppearance,
+                to: decision.newAppearance,
+                questionType: upcomingType,
+            });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sessionLog.length, clearModeEnabled]);
+
+    // Fetches a fresh, plain-language explanation whenever Clear Mode is on and what the
+    // candidate is looking at changes (a different question, or — in one-at-a-time mode — a
+    // different part). AI-generated each time rather than a fixed template, so it reads
+    // naturally and varies instead of feeling like a rigid formula; cached per
+    // question+part in questionExplainer.ts so navigating back doesn't re-call the model.
+    useEffect(() => {
+        if (!clearModeEnabled || !currentQuestion) { setQuestionExplanation(null); return; }
+        let cancelled = false;
+        const part = clearModeAppearance === 'one_at_a_time' ? currentQuestion.requirements[clearModePartIndex] : undefined;
+        const { label, detail } = part ? splitRequirementLabel(part.text) : { label: null, detail: '' };
+        setIsExplaining(true);
+        explainQuestionPart({
+            questionText: currentQuestion.text,
+            partLabel: label ?? undefined,
+            partDetail: label ? detail : undefined,
+        })
+            .then(text => { if (!cancelled) setQuestionExplanation(text); })
+            .catch(() => { if (!cancelled) setQuestionExplanation(null); })
+            .finally(() => { if (!cancelled) setIsExplaining(false); });
+        return () => { cancelled = true; };
+    }, [clearModeEnabled, clearModeAppearance, clearModePartIndex, currentQuestion?.text]);
 
     // Derive coaching mode from question type and requirement ID prefix
     const getCoachingMode = (q: typeof currentQuestion): 'star' | 'motivational' | 'situational' | 'jdcv' | 'jd-understanding' | 'cv-competency' => {
@@ -1429,15 +1633,6 @@ if (recordingStatus === 'recording') await handleRecord();
         return 'star';
     };
     const coachingMode = getCoachingMode(currentQuestion);
-
-    const COACHING_HEADERS: Record<typeof coachingMode, string> = {
-        'star':            'STAR Strategy Checklist',
-        'motivational':    'Your Introduction Framework',
-        'situational':     'Your Experience Framework',
-        'jdcv':            'Connecting Your Experience',
-        'jd-understanding':'Understanding the Role',
-        'cv-competency':   'Evidence from Your Background',
-    };
 
     const MOTIVATIONAL_PHASE_LABELS = ['Who', 'Journey', 'Edge', 'Direction'];
     const SITUATIONAL_PHASE_LABELS  = ['Context', 'Your Role', 'Actions', 'Outcome'];
@@ -1850,8 +2045,18 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                             >
                                 <ShieldAlert size={18} /> Flag an Issue
                             </button>
+                            {email.trim() && (
+                                <button
+                                    onClick={() => setShowSessionHistory(true)}
+                                    className="px-8 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[11px] flex items-center gap-3 hover:bg-slate-50 transition-all active:scale-95"
+                                >
+                                    <History size={18} /> Past Sessions
+                                </button>
+                            )}
                         </div>
                     </div>
+
+                    {showSessionHistory && <SessionHistory email={email} onClose={() => setShowSessionHistory(false)} mesoAccumulator={mesoAccumulator} researcherMode={researcherMode} />}
 
                     {showFlagModal && (
                         <div className="fixed inset-0 bg-slate-900 bg-opacity-80 flex items-center justify-center z-[20000] animate-fade-in p-4" role="dialog" aria-modal="true">
@@ -2668,6 +2873,92 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         <p className="text-[10px] font-medium text-slate-500 italic">{detailedFeedback.calibrationAccuracy.consistentPattern}</p>
                                     </section>
                                 )}
+
+                                {researcherMode && (() => {
+                                    // Tally verified competencies against Tomlinson (2017) Graduate Capital —
+                                    // additive correlation layer, computed client-side from data probingService.ts
+                                    // already returns per-response. Does not alter probe generation/analysis logic.
+                                    const CAPITAL_LABEL: Record<string, string> = {
+                                        human: 'Human', social: 'Social', cultural: 'Cultural',
+                                        psychological: 'Psychological', identity: 'Identity',
+                                    };
+                                    const CAPITAL_COLOR: Record<string, string> = {
+                                        human: 'bg-indigo-500', social: 'bg-emerald-500', cultural: 'bg-amber-500',
+                                        psychological: 'bg-purple-500', identity: 'bg-rose-500',
+                                    };
+                                    const tally: Record<string, number> = { human: 0, social: 0, cultural: 0, psychological: 0, identity: 0 };
+                                    let verifiedCount = 0;
+                                    const evidenceLog: { competency: string; capital: string; quote: string }[] = [];
+                                    sessionLog.forEach(entry => {
+                                        [entry.act1Analysis, entry.probeAnalysis].forEach(a => {
+                                            if (a?.competency_verification?.verified && a.graduate_capital_signal) {
+                                                verifiedCount++;
+                                                tally[a.graduate_capital_signal.primary_capital]++;
+                                                if (a.graduate_capital_signal.secondary_capital) tally[a.graduate_capital_signal.secondary_capital] += 0.5;
+                                                evidenceLog.push({
+                                                    competency: a.competency_verification.competency_tested,
+                                                    capital: a.graduate_capital_signal.primary_capital,
+                                                    quote: a.graduate_capital_signal.evidence_basis,
+                                                });
+                                            }
+                                        });
+                                    });
+                                    const maxTally = Math.max(1, ...Object.values(tally));
+
+                                    if (verifiedCount === 0) return null;
+                                    return (
+                                        <section className="bg-white p-8 rounded-[40px] border border-slate-200 shadow-sm">
+                                            <h3 className="text-sm font-black uppercase tracking-widest text-indigo-600 mb-2 flex items-center gap-2">
+                                                <Layers size={16} /> Graduate Capital Profile
+                                            </h3>
+                                            <p className="text-[9px] font-medium text-slate-400 mb-6">
+                                                Tomlinson (2017) Graduate Capital Model — which capitals this session's {verifiedCount} verified competencies most evidenced
+                                            </p>
+                                            <div className="space-y-4 mb-6">
+                                                {(Object.keys(CAPITAL_LABEL) as (keyof typeof CAPITAL_LABEL)[]).map(k => (
+                                                    <div key={k}>
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">{CAPITAL_LABEL[k]} Capital</span>
+                                                            <span className="text-[11px] font-black text-slate-900">{tally[k]}</span>
+                                                        </div>
+                                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div className={`h-2.5 rounded-full ${CAPITAL_COLOR[k]}`} style={{ width: `${(tally[k] / maxTally) * 100}%` }} />
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {evidenceLog.length > 0 && (
+                                                <div className="space-y-2 pt-4 border-t border-slate-100">
+                                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Verified Evidence → Capital</p>
+                                                    {evidenceLog.map((e, i) => (
+                                                        <div key={i} className="text-[10px] text-slate-600 leading-relaxed">
+                                                            <span className="font-black text-slate-800">{e.competency}</span>
+                                                            <span className="text-slate-400"> → </span>
+                                                            <span className="font-bold capitalize">{e.capital}</span>
+                                                            <span className="text-slate-400"> — {e.quote}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {(() => {
+                                                const unevidenced = (Object.keys(CAPITAL_LABEL) as (keyof typeof CAPITAL_LABEL)[]).filter(k => tally[k] === 0);
+                                                if (unevidenced.length === 0) return null;
+                                                return (
+                                                    <div className="mt-4 pt-4 border-t border-slate-100">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-2">Capital Gaps — Not Yet Evidenced</p>
+                                                        <p className="text-[10px] text-slate-600 leading-relaxed">
+                                                            {unevidenced.map(k => CAPITAL_LABEL[k]).join(', ')} capital had no verified evidence this session.
+                                                            If the target role weighs {unevidenced.length > 1 ? 'these' : 'this'} highly (e.g. team-facing roles
+                                                            → Social, culture-fit-sensitive employers → Cultural), future probes/coaching should
+                                                            deliberately create room for the candidate to evidence it — Tomlinson's model treats an
+                                                            unevidenced capital as an employability gap, not just a missing data point.
+                                                        </p>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </section>
+                                    );
+                                })()}
 
                                 {/* Empty state when CV was provided but JD wasn't substantive enough */}
                                 {cvText && !jdcvAlignmentAnalysis && jobDescription.trim().length < 80 && (
@@ -3736,17 +4027,17 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                     </div>
                                     <div className="space-y-6">
                                         {currentQuestion.requirements.map((req, idx) => (
-                                            <div key={req.id} className={`flex gap-4 transition-all duration-300 ${idx < starPhase ? 'opacity-30' : idx === starPhase ? 'scale-105' : 'opacity-60'}`}>
-                                                <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border-2 ${idx === starPhase ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white border-slate-200 text-slate-400'}`}>
+                                            <div key={req.id} className="flex gap-4">
+                                                <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center border-2 bg-white border-slate-200 text-slate-400">
                                                     <span className="text-[11px] font-black">
                                                         {coachingMode === 'star' ? STAR_LABELS[idx][0] : idx + 1}
                                                     </span>
                                                 </div>
                                                 <div className="flex-1">
                                                     {coachingMode === 'star' && (
-                                                        <span className={`text-[9px] font-black uppercase tracking-widest ${idx === starPhase ? 'text-indigo-600' : 'text-slate-500'}`}>{STAR_LABELS[idx]}</span>
+                                                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{STAR_LABELS[idx]}</span>
                                                     )}
-                                                    <p className={`text-[11px] font-bold leading-tight mt-0.5 ${idx === starPhase ? 'text-slate-900' : 'text-slate-500'}`}>{req.text}</p>
+                                                    <p className="text-[11px] font-bold leading-tight mt-0.5 text-slate-500">{req.text}</p>
                                                 </div>
                                             </div>
                                         ))}
@@ -3813,19 +4104,13 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                         <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[8px] font-black uppercase tracking-widest border border-amber-200">Demo</span>
                                     )}
                                 </div>
-                                {condition !== 'minimal' && (
-                                    <div id="ascend-phase-indicators" className="flex gap-1.5">
-                                        {STAR_LABELS.map((_, i) => (
-                                            <div key={i} className={`h-1.5 rounded-full transition-all duration-500 ${starPhase === i ? 'w-10 bg-indigo-600 shadow-sm' : 'w-2 bg-slate-200'}`} />
-                                        ))}
-                                    </div>
-                                )}
+                                {/* Phase progress dots removed — free-form answers have no live phase to track. */}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
                             <button
                                 id="ascend-deep-probe-button"
-                                onClick={triggerProbing}
+                                onClick={() => triggerProbing('candidate')}
                                 disabled={isGeneratingProbe || transcript.length < 20 || currentQuestionIndex === 0}
                                 className={`px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all border ${isProbingActive
                                     ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
@@ -3839,10 +4124,33 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover:block transition-all">Reflect</span>
                             </button>
+                            {TALK_IT_THROUGH_REVIEWED && (
+                                <button
+                                    id="btn-talk-it-through"
+                                    onClick={() => setIsTalkItThroughOpen(true)}
+                                    className="p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:text-indigo-600 text-slate-600 transition-all flex items-center gap-2 group"
+                                    title="Talk to your AI tutor"
+                                >
+                                    <MessageCircle size={20} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover:block transition-all">Talk it through</span>
+                                </button>
+                            )}
                         </div>
                     </div>
-                    <h2 id="ascend-question-prompt" className="text-lg font-bold text-slate-900 leading-tight">{currentRequirement.text}</h2>
+                    <h2 id="ascend-question-prompt" className="text-lg font-bold text-slate-900 leading-tight">{currentQuestion.text}</h2>
                 </header>
+
+                {isTalkItThroughOpen && (
+                    <TalkItThrough questionText={currentQuestion.text} onClose={() => setIsTalkItThroughOpen(false)} email={email} />
+                )}
+
+                {isVisualExplainerOpen && (
+                    <VisualExplainer
+                        questionText={currentQuestion.text}
+                        requirements={currentQuestion.requirements}
+                        onClose={() => setIsVisualExplainerOpen(false)}
+                    />
+                )}
 
                 <div id="ascend-platform-layout" className="flex-1 bg-white rounded-[40px] border border-slate-200 shadow-xl relative overflow-hidden flex items-center justify-center group">
                     <div id="ascend-timer-module" className="absolute top-6 left-6 z-40">
@@ -3905,17 +4213,15 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 isProbingActive ? (
                                     micCountdown > 0 ? `Mic Opening in ${micCountdown}s...` :
                                         decisionCountdown > 0 ? `Answer Probe (${decisionCountdown}s)` : 'Answer Probe'
-                                ) : coachingMode === 'star' ? `Speak: ${STAR_LABELS[starPhase]}` : `Speak: Part ${starPhase + 1}`
+                                ) : 'Speak Your Answer'
                             ) : 'Stop Speaking'}
                         </button>
                         <button id="ascend-next-step-button" onClick={handleNextPhase} disabled={isGeneratingFeedback} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-700 shadow-md hover:bg-slate-50 transition-all hover:translate-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
                             {isProbingActive
                                 ? (currentQuestionIndex < activeQuestions.length - 1 ? 'Next Question →' : 'Finish Session')
-                                : starPhase < 3
-                                    ? 'Next Step'
-                                    : currentQuestionIndex >= activeQuestions.length - 1
-                                        ? (isGeneratingFeedback ? 'Preparing Report...' : 'Finish Session')
-                                        : 'Deep Analyse & Advance'}
+                                : currentQuestionIndex >= activeQuestions.length - 1
+                                    ? (isGeneratingFeedback ? 'Preparing Report...' : 'Finish Session')
+                                    : 'Submit Answer'}
                         </button>
                         <button
                             onClick={handleNextQuestion}
@@ -3935,10 +4241,10 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                 <div className="p-6 border-b bg-slate-50/50 flex items-center justify-between">
                     <div>
                         <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">
-                            {isProbingActive ? 'Probing Pipeline' : currentQuestionIndex >= activeQuestions.length - 1 && starPhase >= 3 ? 'Session Complete' : 'Coherence Auditor'}
+                            {isProbingActive ? 'Probing Pipeline' : currentQuestionIndex >= activeQuestions.length - 1 && lastQuestionCompleted ? 'Session Complete' : 'Coherence Auditor'}
                         </h3>
                         <p className="text-xs font-bold text-slate-900 leading-tight">
-                            {isProbingActive ? 'Deep Domain Analysis' : currentQuestionIndex >= activeQuestions.length - 1 && starPhase >= 3 ? 'Review your Report Tab, then click Finish Session.' : `"${currentQuestion.text}"`}
+                            {isProbingActive ? 'Deep Domain Analysis' : currentQuestionIndex >= activeQuestions.length - 1 && lastQuestionCompleted ? 'Review your Report Tab, then click Finish Session.' : `"${currentQuestion.text}"`}
                         </p>
                     </div>
                     {isProbingActive && (
@@ -3983,34 +4289,140 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                 <div id="ascend-toolkit-star" className="space-y-6 animate-fade-in">
                                     {!isProbingActive ? (
                                         <div className="border-b border-slate-100 pb-4">
-                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">
-                                                {COACHING_HEADERS[coachingMode]}
-                                            </h4>
+                                            {/* Structure guidance is priming by default (risks manufacturing rehearsed-sounding
+                                                answers, penalises candidates whose natural account doesn't segment into imposed
+                                                phases), so for everyone it stays out of the live screen — assessed and coached
+                                                AFTER the candidate answers instead, in the Insights tab. The one exception is
+                                                Clear Mode, below: a candidate who explicitly opted in, in Support settings, for
+                                                exactly this kind of explicit structure (informed by Maras et al.'s Bath study on
+                                                adapted questions for autistic candidates). Opt-in and disclosed is the difference
+                                                from the default-on panel this replaced. */}
+                                            {clearModeEnabled && fadeLevelMessage && (
+                                                <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start justify-between gap-3">
+                                                    <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">{fadeLevelMessage}</p>
+                                                    <button
+                                                        onClick={() => setFadeLevelMessage(null)}
+                                                        className="text-emerald-600 hover:text-emerald-800 shrink-0 text-xs font-bold"
+                                                        aria-label="Dismiss"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {clearModeEnabled && clearModeAppearance === 'one_at_a_time' ? (
+                                                <div>
+                                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">
+                                                        Part {clearModePartIndex + 1} of {currentQuestion.requirements.length}
+                                                    </h4>
+                                                    {(() => {
+                                                        const current = currentQuestion.requirements[clearModePartIndex];
+                                                        if (!current) return null;
+                                                        const { label, detail } = splitRequirementLabel(current.text);
+                                                        return label ? (
+                                                            <>
+                                                                <p className="text-base text-slate-900 font-black mb-1">{label}</p>
+                                                                <p className="text-sm text-slate-600 font-medium leading-relaxed mb-3">{detail}</p>
+                                                            </>
+                                                        ) : (
+                                                            <p className="text-sm text-slate-800 font-bold leading-relaxed mb-3">{detail}</p>
+                                                        );
+                                                    })()}
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => setClearModePartIndex(p => Math.max(0, p - 1))}
+                                                            disabled={clearModePartIndex === 0}
+                                                            className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-indigo-300 transition-all"
+                                                        >
+                                                            Back
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setClearModePartIndex(p => Math.min(currentQuestion.requirements.length - 1, p + 1))}
+                                                            disabled={clearModePartIndex >= currentQuestion.requirements.length - 1}
+                                                            className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-indigo-300 transition-all"
+                                                        >
+                                                            Next part
+                                                        </button>
+                                                    </div>
+                                                    {(isExplaining || questionExplanation) && (
+                                                        <div className="mt-3 p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                            <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">In plain terms</p>
+                                                            <p className="text-[11px] text-indigo-800 leading-relaxed font-medium">
+                                                                {isExplaining && !questionExplanation ? 'Thinking about how to put this simply…' : questionExplanation}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : clearModeEnabled && clearModeAppearance === 'checklist' ? (
+                                                <div>
+                                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3">
+                                                        What this question is asking
+                                                    </h4>
+                                                    <ul className="space-y-2.5">
+                                                        {currentQuestion.requirements.map((req, i) => {
+                                                            const { label, detail } = splitRequirementLabel(req.text);
+                                                            return (
+                                                                <li key={req.id} className="flex items-start gap-2.5 text-sm text-slate-800 font-bold">
+                                                                    <span className="text-indigo-400 font-black shrink-0">{i + 1}.</span>
+                                                                    {label ?? detail}
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                    {(isExplaining || questionExplanation) && (
+                                                        <div className="mt-3 p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                                            <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 mb-1">In plain terms</p>
+                                                            <p className="text-[11px] text-indigo-800 leading-relaxed font-medium">
+                                                                {isExplaining && !questionExplanation ? 'Thinking about how to put this simply…' : questionExplanation}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">
+                                                        Answer Naturally
+                                                    </h4>
+                                                    <p className="text-[10px] text-slate-500 font-medium mb-3 leading-relaxed">
+                                                        Speak freely in your own words — structure and coaching show up after you submit, in the Insights tab.
+                                                    </p>
+                                                    {/* "Show me what they're looking for" — available to every candidate, not just
+                                                        Clear Mode users, at every appearance level (including Standard). */}
+                                                    <button
+                                                        onClick={() => {
+                                                            const next = !decoderRevealed;
+                                                            setDecoderRevealed(next);
+                                                            if (next) logEvent('support_used', { supportType: 'decoder', questionIndex: currentQuestionIndex });
+                                                        }}
+                                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 underline underline-offset-2 mb-2"
+                                                    >
+                                                        {decoderRevealed ? 'Hide what they\'re looking for' : 'Show me what they\'re looking for'}
+                                                    </button>
+                                                    {decoderRevealed && (
+                                                        <ul className="space-y-2.5 mt-2">
+                                                            {currentQuestion.requirements.map((req, i) => {
+                                                                const { label, detail } = splitRequirementLabel(req.text);
+                                                                return (
+                                                                    <li key={req.id} className="flex items-start gap-2.5 text-sm text-slate-800 font-bold">
+                                                                        <span className="text-indigo-400 font-black shrink-0">{i + 1}.</span>
+                                                                        {label ?? detail}
+                                                                    </li>
+                                                                );
+                                                            })}
+                                                        </ul>
+                                                    )}
+                                                </>
+                                            )}
 
-                                            {coachingMode === 'motivational' && (
-                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    Your introduction sets the tone for the entire interview. Take the interviewer through <span className="font-black">who you are</span>, the experiences that shaped you, <span className="font-black">what makes you genuinely different</span>, and why this opportunity matters to you. Interviewers remember candidates who tell a coherent story rather than listing their qualifications.
-                                                </p>
-                                            )}
-                                            {coachingMode === 'situational' && (
-                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    Academic projects, placements, society roles, and part-time work are all strong evidence of your capability. Focus on <span className="font-black">what you personally contributed</span> rather than what your group achieved together.
-                                                </p>
-                                            )}
-                                            {coachingMode === 'jdcv' && (
-                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    This question is drawn directly from your CV and the job description. Use your real experience to address what this role requires, and make the connection between your background and the opportunity explicit.
-                                                </p>
-                                            )}
-                                            {coachingMode === 'jd-understanding' && (
-                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    Show the interviewer that you have thought carefully about what this role actually involves beyond the job title. Candidates who understand the real demands of a role stand out immediately.
-                                                </p>
-                                            )}
-                                            {coachingMode === 'cv-competency' && (
-                                                <p className="text-[10px] text-indigo-500 font-medium mb-3 leading-relaxed">
-                                                    This question is probing a specific claim or achievement from your CV. The more precise and concrete your answer, the more credible it becomes. Vague answers about things you have listed tend to raise more questions than they answer.
-                                                </p>
+                                            {/* "Explain this visually" — available at every fade level, same as the decoder.
+                                                Hidden entirely when the candidate has set "Visual explanations: Never" in
+                                                Support Settings. */}
+                                            {visualExplanationsTrigger !== 'never' && (
+                                                <button
+                                                    onClick={() => { setIsVisualExplainerOpen(true); setExplainerUsedThisQuestion(true); logEvent('support_used', { supportType: 'visual_explainer', questionIndex: currentQuestionIndex }); }}
+                                                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 underline underline-offset-2 mb-2 block"
+                                                >
+                                                    Explain this visually
+                                                </button>
                                             )}
 
                                             {/* Keyword Pathfinder — scaffolded condition only */}
@@ -4034,72 +4446,6 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 </div>
                                             )}
 
-                                            <div className="space-y-3">
-                                                {currentQuestion.requirements.map((req, idx) => (
-                                                    <div key={req.id} className="flex items-start gap-3">
-                                                        <div className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black transition-all ${
-                                                            idx < starPhase ? 'bg-emerald-500 border-emerald-500 text-white' :
-                                                            idx === starPhase ? 'bg-white border-indigo-600 text-indigo-600 shadow-sm' :
-                                                            'bg-white border-slate-200 text-slate-300'
-                                                        }`}>
-                                                            {idx < starPhase ? '✓' : idx + 1}
-                                                        </div>
-                                                        <div className="flex-1">
-                                                            {coachingMode === 'star' && (
-                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
-                                                                    idx < starPhase ? 'text-emerald-600' :
-                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
-                                                                }`}>
-                                                                    {STAR_LABELS[idx]}
-                                                                </p>
-                                                            )}
-                                                            {coachingMode === 'motivational' && (
-                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
-                                                                    idx < starPhase ? 'text-emerald-600' :
-                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
-                                                                }`}>
-                                                                    {MOTIVATIONAL_PHASE_LABELS[idx]}
-                                                                </p>
-                                                            )}
-                                                            {coachingMode === 'situational' && (
-                                                                <p className={`text-[10px] font-black uppercase tracking-widest ${
-                                                                    idx < starPhase ? 'text-emerald-600' :
-                                                                    idx === starPhase ? 'text-indigo-600' : 'text-slate-400'
-                                                                }`}>
-                                                                    {SITUATIONAL_PHASE_LABELS[idx]}
-                                                                </p>
-                                                            )}
-                                                            {liveTools.questionChecklist && (
-                                                                <p className={`text-[11px] font-medium leading-tight mt-0.5 ${
-                                                                    idx === starPhase ? 'text-slate-900' : 'text-slate-400'
-                                                                }`}>
-                                                                    {req.text}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-
-                                            {/* Competency label */}
-                                            {currentQuestion.competency && (
-                                                <div className="mt-4 flex items-center gap-2">
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Assessing</span>
-                                                    <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                                                        {currentQuestion.competency}
-                                                    </span>
-                                                </div>
-                                            )}
-
-                                            {/* Excellence benchmark */}
-                                            {currentQuestion.excellenceBenchmark && (
-                                                <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-                                                    <p className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-1">What excellent looks like</p>
-                                                    <p className="text-[10px] text-amber-800 leading-relaxed font-medium">
-                                                        {currentQuestion.excellenceBenchmark}
-                                                    </p>
-                                                </div>
-                                            )}
                                         </div>
                                     ) : (
                                         <div className="border-b border-slate-100 pb-4">
@@ -4108,34 +4454,9 @@ ${typeof detailedFeedback.maskedTranscript === 'object' ? (detailedFeedback.mask
                                                 <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Follow-up Session Active</h4>
                                             </div>
                                             <p className="text-[10px] font-medium text-slate-500 leading-relaxed italic">
-                                                The STAR checklist is hidden while we explore this specific domain probe. Respond to the probe to continue or move to the next question.
                                             </p>
                                         </div>
                                     )}
-
-                                    {currentQuestion.keywords && currentQuestion.keywords.length > 0 && (
-                                        <div>
-                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3">Key Vocabulary</h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {(currentQuestion?.keywords || []).map((kw, i) => (
-                                                    <span key={i} className="px-2 py-1 bg-slate-50 text-slate-600 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200">
-                                                        {kw}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 italic">
-                                        <p className="text-[10px] font-medium text-indigo-700 leading-relaxed">
-                                            {coachingMode === 'motivational'
-                                                ? <>Move naturally through each section as though you are sharing your story rather than reading from a checklist. The <span className="font-black uppercase tracking-widest">Direction</span> section is where many candidates lose momentum, so give genuine thought to how you connect your past to where you want to go.</>
-                                                : coachingMode === 'situational'
-                                                ? <>Academic and placement experiences carry real weight in interviews. The <span className="font-black uppercase tracking-widest">Actions</span> section is your opportunity to show exactly what you personally contributed, so be as specific as you can.</>
-                                                : <>Interviewers remember the <span className="font-black uppercase tracking-widest">Action</span> section most. Phrases like &quot;I decided&quot; and &quot;I built&quot; create a stronger impression than &quot;we tried&quot;. Always close with a <span className="font-black uppercase tracking-widest">measurable Result</span>.</>
-                                            }
-                                        </p>
-                                    </div>
 
                                     {isGeneratingProbe && (
                                         <div className="p-8 flex flex-col items-center justify-center text-center gap-4 bg-indigo-50/30 rounded-[32px] border-2 border-dashed border-indigo-100 animate-pulse">

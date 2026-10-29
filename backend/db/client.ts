@@ -16,9 +16,19 @@ const getPool = (): pg.Pool => {
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is not set in .env — backend API unavailable.');
   }
+  // SSL based on the target host, not NODE_ENV — a hosted database (Supabase or otherwise)
+  // expects/requires TLS regardless of whether this is a local dev run or a deployed one; only a
+  // genuinely local Postgres (localhost/127.0.0.1) has no real use for it. Previously this was
+  // gated on NODE_ENV === 'production' alone, which would have left a remote DATABASE_URL
+  // unencrypted during local development.
+  const dbHost = (() => {
+    try { return new URL(process.env.DATABASE_URL!).hostname; } catch { return ''; }
+  })();
+  const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1' || dbHost === '';
+
   _pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: isLocalHost ? false : { rejectUnauthorized: false },
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,

@@ -65,9 +65,9 @@ const QUESTIONS: Question[] = [
     text: 'Outside of formal settings, how do you usually get feedback on your work?',
     subtext: 'This shapes how the session encourages you to use feedback going forward.',
     options: [
-      { label: 'I actively ask for it — from peers, mentors, or anyone I trust', value: 'proactive' },
+      { label: 'I actively ask for it, from peers, mentors, or anyone I trust', value: 'proactive' },
       { label: 'I wait until feedback is offered, then I use it', value: 'responsive' },
-      { label: 'I tend to avoid it — it can feel uncomfortable', value: 'avoidant' },
+      { label: 'I tend to avoid it, it can feel uncomfortable', value: 'avoidant' },
       { label: "I'm not sure I have a consistent pattern", value: 'uncertain' },
     ],
   },

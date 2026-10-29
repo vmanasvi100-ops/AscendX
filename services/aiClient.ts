@@ -30,9 +30,11 @@ export interface ChatSession {
 }
 
 // Mimics ai.chats.create(...) — returns an object with the same sendMessageStream()
-// shape the SDK's Chat object exposes, so calling code (e.g. ResumeCoach.tsx) is
-// unchanged. History is tracked client-side and resent each turn (stateless proxy —
-// avoids needing server-side session storage).
+// shape the SDK's Chat object exposes. History is tracked client-side and resent
+// each turn (stateless proxy — avoids needing server-side session storage).
+// Currently unused (its original consumer, the CV-auditor chat, was removed along
+// with the job-search feature) — kept as generic reusable plumbing for any future
+// multi-turn AI chat feature.
 export const createChatSession = (
   model: string,
   config: { systemInstruction?: string } & Record<string, any> = {}
